@@ -22,11 +22,11 @@ mod macos {
     /// Virtual keycodes for the hotkey ids offered in settings.
     pub fn keycode_from_id(id: &str) -> u16 {
         match id {
-            "right-alt" => 0x3D,  // right option
-            "fn" => 0x3F,         // fn/globe
-            "left-ctrl" => 0x3B,  // left control
-            "f5" => 0x60,         // F5
-            _ => 0x36,            // right command ("right-cmd" and the fallback)
+            "right-alt" => 0x3D, // right option
+            "fn" => 0x3F,        // fn/globe
+            "left-ctrl" => 0x3B, // left control
+            "f5" => 0x60,        // F5
+            _ => 0x36,           // right command ("right-cmd" and the fallback)
         }
     }
 
