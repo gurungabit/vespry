@@ -43,7 +43,15 @@ cd src-tauri && cargo test --lib
 
 ## Releases
 
-Grab the latest DMG from [Releases](https://github.com/gurungabit/vespry/releases). Builds are unsigned for now — right-click → Open on first launch, or `xattr -dr com.apple.quarantine /Applications/Vespry.app`.
+Grab the latest DMG from [Releases](https://github.com/gurungabit/vespry/releases), drag Vespry to Applications, then run this once before opening it:
+
+```
+xattr -dr com.apple.quarantine /Applications/Vespry.app
+```
+
+Builds are ad-hoc signed but not notarized (that needs a paid Apple Developer account), so macOS quarantines the download and claims the app is **"damaged"** until that flag is cleared. It isn't — and on Apple Silicon, right-click → Open does *not* bypass this; the `xattr` command is the fix.
+
+**Which build am I running?** Settings → About shows the version and the exact commit it was built from.
 
 To cut a release:
 

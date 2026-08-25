@@ -44,14 +44,29 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Deep ad-hoc signature over the whole bundle. Without it the
+          # nested frameworks' seals don't validate and Gatekeeper reports
+          # the download as "damaged" rather than merely unidentified.
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Vespry ${{ github.ref_name }}"
           releaseBody: |
-            On-device dictation for macOS (Apple Silicon).
+            On-device dictation for macOS 14+ (Apple Silicon).
 
-            **Install:** download the `.dmg`, drag Vespry to Applications. The build is unsigned — on first launch, right-click the app → Open (or run `xattr -dr com.apple.quarantine /Applications/Vespry.app`).
+            ### Install
 
-            Models (~2 GB) download on first run. Grant Microphone + Accessibility when prompted.
+            1. Download the `.dmg` and drag **Vespry** to Applications.
+            2. Run this once, then open Vespry:
+
+                ```
+                xattr -dr com.apple.quarantine /Applications/Vespry.app
+                ```
+
+            Step 2 is required: the app is signed but not notarized (that needs a paid Apple Developer account), so macOS quarantines the download and reports it as **"damaged"** until the flag is cleared. It isn't damaged — right-click → Open does *not* work around this for unnotarized builds on Apple Silicon; the `xattr` command does.
+
+            Models (~3 GB total) download on first run. Grant Microphone and Accessibility when prompted.
+
+            Check what you're running in **Settings → About** — it shows the version and the exact commit.
           releaseDraft: false
           prerelease: false

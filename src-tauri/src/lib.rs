@@ -93,6 +93,21 @@ fn list_models(app: AppHandle) -> Vec<ModelInfo> {
     list
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    version: String,
+    commit: String,
+}
+
+#[tauri::command]
+fn get_app_info(app: AppHandle) -> AppInfo {
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        commit: env!("VESPRY_GIT_SHA").to_string(),
+    }
+}
+
 #[tauri::command]
 fn get_history(app: AppHandle) -> Vec<history::HistoryEntry> {
     history::load(&app)
@@ -258,6 +273,7 @@ pub fn run() {
             download_cleanup_model,
             list_models,
             download_model,
+            get_app_info,
             get_history,
             delete_history_entry,
             clear_history,
