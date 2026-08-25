@@ -1,6 +1,6 @@
 [package]
 name = "vespry"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local, private dictation for your Mac — hold a key, speak, done."
 authors = ["abit"]
 edition = "2021"
