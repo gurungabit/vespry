@@ -1,10 +1,13 @@
 mod asr;
 mod audio;
 mod controller;
+mod hud;
 mod inject;
 mod models;
 mod shortcuts;
+mod sounds;
 
+use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -18,8 +21,48 @@ fn show_settings(app: &AppHandle) {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Status {
+    microphone: bool,
+    accessibility: bool,
+    model_installed: bool,
+}
+
+#[tauri::command]
+async fn get_status(app: AppHandle) -> Status {
+    #[cfg(target_os = "macos")]
+    let (microphone, accessibility) = (
+        tauri_plugin_macos_permissions::check_microphone_permission().await,
+        tauri_plugin_macos_permissions::check_accessibility_permission().await,
+    );
+    #[cfg(not(target_os = "macos"))]
+    let (microphone, accessibility) = (true, true);
+    Status {
+        microphone,
+        accessibility,
+        model_installed: models::parakeet_installed(&app),
+    }
+}
+
+#[tauri::command]
+async fn request_permission(name: String) {
+    #[cfg(target_os = "macos")]
+    match name.as_str() {
+        "microphone" => {
+            let _ = tauri_plugin_macos_permissions::request_microphone_permission().await;
+        }
+        "accessibility" => {
+            tauri_plugin_macos_permissions::request_accessibility_permission().await;
+        }
+        _ => {}
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = name;
+}
+
 #[cfg(target_os = "macos")]
-async fn request_permissions() {
+async fn request_permissions_on_launch() {
     use tauri_plugin_macos_permissions as perms;
     if !perms::check_microphone_permission().await {
         let _ = perms::request_microphone_permission().await;
@@ -34,9 +77,16 @@ async fn request_permissions() {
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_macos_permissions::init())
+        .plugin(tauri_plugin_macos_permissions::init());
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_nspanel::init());
+    }
+
+    builder
+        .invoke_handler(tauri::generate_handler![get_status, request_permission])
         .setup(|app| {
             // Menu-bar app: no Dock icon, lives in the tray.
             #[cfg(target_os = "macos")]
@@ -60,6 +110,9 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // The floating dictation pill (hidden until dictation starts).
+            hud::init(app.handle())?;
+
             // The dictation pipeline thread + the global hotkey listener.
             let pipeline = controller::spawn(app.handle().clone());
             shortcuts::spawn_listener(pipeline.clone());
@@ -69,7 +122,7 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 #[cfg(target_os = "macos")]
-                request_permissions().await;
+                request_permissions_on_launch().await;
                 match models::ensure_parakeet(&handle).await {
                     Ok(_) => {
                         let _ = pipeline.send(controller::PipelineEvent::PreloadModel);

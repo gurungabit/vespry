@@ -19,6 +19,49 @@ impl ParakeetTranscriber {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    /// End-to-end ASR check without a microphone: synthesize speech with the
+    /// macOS `say` command and run it through Parakeet. Skips (passes) if the
+    /// model hasn't been downloaded yet — run the app once first.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn transcribes_synthesized_speech() {
+        let home = std::env::var("HOME").unwrap();
+        let model_dir = std::path::PathBuf::from(home)
+            .join("Library/Application Support/com.vespry.app/models")
+            .join(crate::models::PARAKEET_DIR);
+        if !model_dir.join("vocab.txt").exists() {
+            eprintln!("skipping: Parakeet model not downloaded");
+            return;
+        }
+        let wav = std::env::temp_dir().join("vespry_asr_test.wav");
+        let status = Command::new("say")
+            .args([
+                "-o",
+                wav.to_str().unwrap(),
+                "--file-format=WAVE",
+                "--data-format=LEI16@16000",
+                "hello world, this is a dictation test",
+            ])
+            .status()
+            .expect("running `say`");
+        assert!(status.success(), "`say` failed");
+
+        let samples = transcribe_rs::audio::read_wav_samples(&wav).expect("reading wav");
+        let mut t = ParakeetTranscriber::load(&model_dir).expect("loading model");
+        let text = t.transcribe(&samples).expect("transcribing").to_lowercase();
+        println!("transcript: {text:?}");
+        assert!(
+            text.contains("hello world") && text.contains("dictation test"),
+            "unexpected transcript: {text:?}"
+        );
+    }
+}
+
 impl Transcriber for ParakeetTranscriber {
     fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
         let started = std::time::Instant::now();

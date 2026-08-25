@@ -1,9 +1,11 @@
 use crate::asr::parakeet::ParakeetTranscriber;
 use crate::asr::Transcriber;
 use crate::audio::Recorder;
-use crate::{inject, models};
+use crate::sounds::{self, Chime};
+use crate::{hud, inject, models};
 use serde::Serialize;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug)]
@@ -18,7 +20,7 @@ pub enum PipelineEvent {
 #[serde(tag = "state", rename_all = "kebab-case")]
 enum DictationState {
     Idle,
-    Listening,
+    Listening { hands_free: bool },
     Transcribing,
     Injecting,
     Error { message: String },
@@ -28,6 +30,13 @@ fn set_state(app: &AppHandle, state: DictationState) {
     let _ = app.emit("dictation-state", state);
 }
 
+/// A press-to-release shorter than this is a tap: it arms hands-free mode
+/// (keep listening until the key is tapped again) instead of stopping.
+const TAP_MS: u128 = 300;
+
+/// Ignore blips shorter than this — almost certainly an accidental tap.
+const MIN_SAMPLES: usize = (crate::audio::TARGET_RATE as usize) / 4;
+
 /// Spawn the pipeline thread. It owns the recorder (whose cpal stream is
 /// !Send) and the loaded ASR model, and reacts to hotkey events.
 pub fn spawn(app: AppHandle) -> Sender<PipelineEvent> {
@@ -36,78 +45,134 @@ pub fn spawn(app: AppHandle) -> Sender<PipelineEvent> {
     tx
 }
 
-/// Ignore blips shorter than this — almost certainly an accidental tap.
-const MIN_SAMPLES: usize = (crate::audio::TARGET_RATE as usize) / 4;
+struct Pipeline {
+    app: AppHandle,
+    recorder: Recorder,
+    transcriber: Option<ParakeetTranscriber>,
+    listening: bool,
+    hands_free: bool,
+    pressed_at: Instant,
+}
 
 fn run(app: AppHandle, rx: Receiver<PipelineEvent>) {
-    let mut recorder = Recorder::new();
-    let mut transcriber: Option<ParakeetTranscriber> = None;
-    let mut listening = false;
+    let mut p = Pipeline {
+        app,
+        recorder: Recorder::new(),
+        transcriber: None,
+        listening: false,
+        hands_free: false,
+        pressed_at: Instant::now(),
+    };
 
     for event in rx {
         match event {
             PipelineEvent::PreloadModel => {
-                if transcriber.is_none() {
-                    transcriber = load_transcriber(&app);
+                if p.transcriber.is_none() {
+                    p.transcriber = load_transcriber(&p.app);
                 }
             }
-            PipelineEvent::HotkeyPressed if !listening => {
-                match recorder.start(app.clone()) {
-                    Ok(()) => {
-                        listening = true;
-                        set_state(&app, DictationState::Listening);
+            PipelineEvent::HotkeyPressed => {
+                if p.listening {
+                    // Second press while hands-free → stop and transcribe.
+                    // (Its matching release arrives when we're no longer
+                    // listening and falls through harmlessly.)
+                    if p.hands_free {
+                        p.finish();
                     }
-                    Err(e) => fail(&app, format!("couldn't start recording: {e:#}")),
+                } else {
+                    p.pressed_at = Instant::now();
+                    p.start();
                 }
             }
-            PipelineEvent::HotkeyReleased if listening => {
-                listening = false;
-                let samples = match recorder.stop() {
-                    Ok(s) => s,
-                    Err(e) => {
-                        fail(&app, format!("audio capture failed: {e:#}"));
-                        continue;
-                    }
-                };
-                if samples.len() < MIN_SAMPLES {
-                    set_state(&app, DictationState::Idle);
+            PipelineEvent::HotkeyReleased => {
+                if !p.listening || p.hands_free {
                     continue;
                 }
-                set_state(&app, DictationState::Transcribing);
-                if transcriber.is_none() {
-                    transcriber = load_transcriber(&app);
-                }
-                let Some(t) = transcriber.as_mut() else {
-                    fail(&app, "speech model unavailable".to_string());
-                    continue;
-                };
-                match t.transcribe(&samples) {
-                    Ok(text) if text.is_empty() => set_state(&app, DictationState::Idle),
-                    Ok(text) => {
-                        log::info!("transcript: {text:?}");
-                        set_state(&app, DictationState::Injecting);
-                        if let Err(e) = inject::inject_text(&text) {
-                            fail(&app, format!("couldn't insert text: {e:#}"));
-                        } else {
-                            set_state(&app, DictationState::Idle);
-                        }
-                    }
-                    Err(e) => fail(&app, format!("transcription failed: {e:#}")),
+                if p.pressed_at.elapsed().as_millis() < TAP_MS {
+                    // Quick tap → stay listening hands-free.
+                    p.hands_free = true;
+                    set_state(&p.app, DictationState::Listening { hands_free: true });
+                } else {
+                    p.finish();
                 }
             }
-            _ => {}
         }
+    }
+}
+
+impl Pipeline {
+    fn start(&mut self) {
+        match self.recorder.start(self.app.clone()) {
+            Ok(()) => {
+                self.listening = true;
+                self.hands_free = false;
+                set_state(&self.app, DictationState::Listening { hands_free: false });
+                hud::show(&self.app);
+                sounds::play(Chime::Start);
+            }
+            Err(e) => self.fail(format!("couldn't start recording: {e:#}")),
+        }
+    }
+
+    fn finish(&mut self) {
+        self.listening = false;
+        self.hands_free = false;
+        sounds::play(Chime::Stop);
+        let samples = match self.recorder.stop() {
+            Ok(s) => s,
+            Err(e) => {
+                self.fail(format!("audio capture failed: {e:#}"));
+                return;
+            }
+        };
+        if samples.len() < MIN_SAMPLES {
+            self.idle();
+            return;
+        }
+        set_state(&self.app, DictationState::Transcribing);
+        if self.transcriber.is_none() {
+            self.transcriber = load_transcriber(&self.app);
+        }
+        let Some(t) = self.transcriber.as_mut() else {
+            self.fail("speech model unavailable".to_string());
+            return;
+        };
+        match t.transcribe(&samples) {
+            Ok(text) if text.is_empty() => self.idle(),
+            Ok(text) => {
+                log::info!("transcript: {text:?}");
+                set_state(&self.app, DictationState::Injecting);
+                if let Err(e) = inject::inject_text(&text) {
+                    self.fail(format!("couldn't insert text: {e:#}"));
+                } else {
+                    self.idle();
+                }
+            }
+            Err(e) => self.fail(format!("transcription failed: {e:#}")),
+        }
+    }
+
+    fn idle(&self) {
+        set_state(&self.app, DictationState::Idle);
+        hud::hide_later(&self.app, Duration::from_millis(600));
+    }
+
+    fn fail(&self, message: String) {
+        log::error!("{message}");
+        set_state(
+            &self.app,
+            DictationState::Error {
+                message: message.clone(),
+            },
+        );
+        sounds::play(Chime::Error);
+        hud::hide_later(&self.app, Duration::from_millis(2200));
     }
 }
 
 fn fail(app: &AppHandle, message: String) {
     log::error!("{message}");
-    set_state(
-        app,
-        DictationState::Error {
-            message: message.clone(),
-        },
-    );
+    set_state(app, DictationState::Error { message });
 }
 
 fn load_transcriber(app: &AppHandle) -> Option<ParakeetTranscriber> {

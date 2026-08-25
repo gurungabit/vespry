@@ -1,4 +1,5 @@
 import { useState } from "react";
+import General from "./settings/General";
 
 const TABS = ["General", "Models", "Dictionary", "History", "About"] as const;
 type Tab = (typeof TABS)[number];
@@ -42,7 +43,7 @@ export default function App() {
         ))}
       </aside>
       <main className="flex-1 overflow-y-auto p-6">
-        <Placeholder tab={tab} />
+        {tab === "General" ? <General /> : <Placeholder tab={tab} />}
       </main>
     </div>
   );
