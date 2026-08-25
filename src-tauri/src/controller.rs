@@ -6,7 +6,7 @@ use crate::cleanup::llama::LlamaCleanup;
 use crate::cleanup::{prompt, CleanupEngine};
 use crate::settings::SharedSettings;
 use crate::sounds::{self, Chime};
-use crate::{hud, inject, models};
+use crate::{history, hud, inject, models};
 use serde::Serialize;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -136,16 +136,22 @@ impl Pipeline {
                 self.hands_free = false;
                 set_state(&self.app, DictationState::Listening { hands_free: false });
                 hud::show(&self.app);
-                sounds::play(Chime::Start);
+                self.chime(Chime::Start);
             }
             Err(e) => self.fail(format!("couldn't start recording: {e:#}")),
+        }
+    }
+
+    fn chime(&self, chime: Chime) {
+        if self.settings.read().unwrap().sounds_enabled {
+            sounds::play(chime);
         }
     }
 
     fn finish(&mut self) {
         self.listening = false;
         self.hands_free = false;
-        sounds::play(Chime::Stop);
+        self.chime(Chime::Stop);
         let samples = match self.recorder.stop() {
             Ok(s) => s,
             Err(e) => {
@@ -167,7 +173,10 @@ impl Pipeline {
             Ok(text) if text.is_empty() => self.idle(),
             Ok(text) => {
                 log::info!("transcript: {text:?}");
+                let raw = text.clone();
                 let text = self.maybe_cleanup(text);
+                let cleaned = (text != raw).then_some(text.as_str());
+                history::record(&self.app, &raw, cleaned);
                 set_state(&self.app, DictationState::Injecting);
                 if let Err(e) = inject::inject_text(&text) {
                     self.fail(format!("couldn't insert text: {e:#}"));
@@ -245,7 +254,7 @@ impl Pipeline {
                 message: message.clone(),
             },
         );
-        sounds::play(Chime::Error);
+        self.chime(Chime::Error);
         hud::hide_later(&self.app, Duration::from_millis(2200));
     }
 }

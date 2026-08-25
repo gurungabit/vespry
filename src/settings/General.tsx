@@ -12,7 +12,45 @@ type Status = {
 type Settings = {
   cleanupEnabled: boolean;
   dictionary: string[];
+  engine: string;
+  whisperModel: string;
+  language: string | null;
+  hotkey: string;
+  soundsEnabled: boolean;
 };
+
+const HOTKEYS: [string, string][] = [
+  ["right-cmd", "Right ⌘"],
+  ["right-alt", "Right ⌥"],
+  ["fn", "Fn 🌐 (set 🌐 key to “Do Nothing” in System Settings)"],
+  ["left-ctrl", "Left ⌃"],
+  ["f5", "F5"],
+];
+
+function Toggle({
+  on,
+  onClick,
+}: {
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      role="switch"
+      aria-checked={on}
+      className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${
+        on ? "bg-blue-500" : "bg-neutral-300 dark:bg-neutral-600"
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+          on ? "left-[18px]" : "left-0.5"
+        }`}
+      />
+    </button>
+  );
+}
 
 type Download = {
   model: string;
@@ -87,18 +125,31 @@ export default function General() {
     };
   }, []);
 
+  const [autostart, setAutostart] = useState(false);
+  useEffect(() => {
+    invoke<boolean>("get_autostart").then(setAutostart).catch(console.error);
+  }, []);
+
   const request = (name: string) =>
     invoke("request_permission", { name }).then(refresh);
+
+  const save = (next: Settings) => {
+    setSettings(next);
+    invoke("set_settings", { newSettings: next }).catch(console.error);
+  };
 
   const toggleCleanup = () => {
     if (!settings) return;
     const next = { ...settings, cleanupEnabled: !settings.cleanupEnabled };
-    setSettings(next);
-    invoke("set_settings", { newSettings: next }).catch(console.error);
+    save(next);
     if (next.cleanupEnabled && status && !status.cleanupModelInstalled) {
       invoke("download_cleanup_model").then(refresh).catch(console.error);
     }
   };
+
+  const hotkeyLabel =
+    HOTKEYS.find(([id]) => id === settings?.hotkey)?.[1]?.split(" (")[0] ??
+    "Right ⌘";
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-3">
@@ -157,27 +208,53 @@ export default function General() {
               : "Downloads Qwen3 (~1.1 GB) on first enable"}
           </p>
         </div>
-        <button
-          onClick={toggleCleanup}
-          role="switch"
-          aria-checked={settings?.cleanupEnabled ?? false}
-          className={`relative h-6 w-10 rounded-full transition-colors ${
-            settings?.cleanupEnabled ? "bg-blue-500" : "bg-neutral-300 dark:bg-neutral-600"
-          }`}
+        <Toggle on={settings?.cleanupEnabled ?? false} onClick={toggleCleanup} />
+      </div>
+
+      <h2 className="mt-4 text-base font-semibold">Behavior</h2>
+      <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <p className="text-sm font-medium">Push-to-talk key</p>
+        <select
+          value={settings?.hotkey ?? "right-cmd"}
+          onChange={(e) =>
+            settings && save({ ...settings, hotkey: e.target.value })
+          }
+          className="max-w-56 rounded-md border border-black/10 bg-white px-2 py-1 text-sm dark:border-white/10 dark:bg-neutral-800"
         >
-          <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
-              settings?.cleanupEnabled ? "left-[18px]" : "left-0.5"
-            }`}
-          />
-        </button>
+          {HOTKEYS.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <p className="text-sm font-medium">Start & stop sounds</p>
+        <Toggle
+          on={settings?.soundsEnabled ?? true}
+          onClick={() =>
+            settings &&
+            save({ ...settings, soundsEnabled: !settings.soundsEnabled })
+          }
+        />
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <p className="text-sm font-medium">Launch at login</p>
+        <Toggle
+          on={autostart}
+          onClick={() => {
+            const next = !autostart;
+            setAutostart(next);
+            invoke("set_autostart", { enabled: next }).catch(console.error);
+          }}
+        />
       </div>
 
       <h2 className="mt-4 text-base font-semibold">How to dictate</h2>
       <div className="rounded-lg border border-black/10 bg-white/60 px-4 py-3 text-sm leading-6 dark:border-white/10 dark:bg-white/5">
         <p>
-          <b>Hold right ⌘</b> and speak, release to insert the text wherever
-          your cursor is.
+          <b>Hold {hotkeyLabel}</b> and speak, release to insert the text
+          wherever your cursor is.
         </p>
         <p className="text-neutral-500 dark:text-neutral-400">
           Quick-tap instead to dictate hands-free — tap again to finish.

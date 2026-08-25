@@ -1,6 +1,8 @@
 import { useState } from "react";
 import General from "./settings/General";
 import Models from "./settings/Models";
+import Dictionary from "./settings/Dictionary";
+import History from "./settings/History";
 
 const TABS = ["General", "Models", "Dictionary", "History", "About"] as const;
 type Tab = (typeof TABS)[number];
@@ -48,6 +50,10 @@ export default function App() {
           <General />
         ) : tab === "Models" ? (
           <Models />
+        ) : tab === "Dictionary" ? (
+          <Dictionary />
+        ) : tab === "History" ? (
+          <History />
         ) : (
           <Placeholder tab={tab} />
         )}

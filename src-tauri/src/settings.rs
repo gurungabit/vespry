@@ -17,6 +17,10 @@ pub struct Settings {
     pub whisper_model: String,
     /// Spoken-language hint for whisper (BCP-47, e.g. "ja"); None = auto-detect.
     pub language: Option<String>,
+    /// Push-to-talk key id: right-cmd, right-alt, fn, left-ctrl, f5.
+    pub hotkey: String,
+    /// Play start/stop chimes.
+    pub sounds_enabled: bool,
 }
 
 impl Default for Settings {
@@ -27,6 +31,8 @@ impl Default for Settings {
             engine: "parakeet".into(),
             whisper_model: "small".into(),
             language: None,
+            hotkey: "right-cmd".into(),
+            sounds_enabled: true,
         }
     }
 }

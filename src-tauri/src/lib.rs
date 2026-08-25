@@ -2,6 +2,7 @@ mod asr;
 mod audio;
 mod cleanup;
 mod controller;
+mod history;
 mod hud;
 mod inject;
 mod models;
@@ -93,6 +94,38 @@ fn list_models(app: AppHandle) -> Vec<ModelInfo> {
 }
 
 #[tauri::command]
+fn get_history(app: AppHandle) -> Vec<history::HistoryEntry> {
+    history::load(&app)
+}
+
+#[tauri::command]
+fn delete_history_entry(app: AppHandle, at: u64) -> Result<(), String> {
+    history::delete(&app, at).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_history(app: AppHandle) -> Result<(), String> {
+    history::clear(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|e| e.to_string())
+    } else {
+        autolaunch.disable().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
 async fn download_model(app: AppHandle, id: String) -> Result<(), String> {
     match id.as_str() {
         "parakeet" => models::ensure_parakeet(&app).await.map(|_| ()),
@@ -176,6 +209,10 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_macos_permissions::init());
     #[cfg(target_os = "macos")]
     {
@@ -190,7 +227,12 @@ pub fn run() {
             set_settings,
             download_cleanup_model,
             list_models,
-            download_model
+            download_model,
+            get_history,
+            delete_history_entry,
+            clear_history,
+            get_autostart,
+            set_autostart
         ])
         .setup(|app| {
             // Menu-bar app: no Dock icon, lives in the tray.
@@ -203,7 +245,7 @@ pub fn run() {
 
             // The dictation pipeline thread + the global hotkey listener.
             let pipeline = controller::spawn(app.handle().clone(), shared_settings.clone());
-            shortcuts::spawn_listener(pipeline.clone());
+            shortcuts::spawn_listener(pipeline.clone(), shared_settings.clone());
             app.manage(PipelineHandle(std::sync::Mutex::new(pipeline.clone())));
 
             let toggle = MenuItem::with_id(app, "toggle", "Start / Stop Dictation", true, None::<&str>)?;
