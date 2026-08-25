@@ -159,7 +159,11 @@ export default function General() {
           <Row
             ok={status.microphone}
             label="Microphone"
-            detail="Needed to hear you dictate"
+            detail={
+              status.microphone
+                ? "Needed to hear you dictate"
+                : "Needed to hear you dictate. If no prompt appears, System Settings opens — enable Vespry there, then relaunch."
+            }
             action="Grant"
             onAction={() => request("microphone")}
           />

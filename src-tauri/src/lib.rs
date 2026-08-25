@@ -188,17 +188,39 @@ async fn get_status(app: AppHandle) -> Status {
     }
 }
 
+/// Ask for a permission, falling back to the relevant System Settings pane.
+///
+/// macOS shows each consent prompt only once per app identity: once the user
+/// has answered (or a stale TCC record exists from an earlier build), the
+/// request call returns the cached answer immediately and no dialog appears —
+/// which looked like a dead "Grant" button. If the permission isn't granted
+/// shortly after asking, send the user somewhere they can actually change it.
 #[tauri::command]
 async fn request_permission(name: String) {
     #[cfg(target_os = "macos")]
-    match name.as_str() {
-        "microphone" => {
-            let _ = tauri_plugin_macos_permissions::request_microphone_permission().await;
-        }
-        "accessibility" => {
-            tauri_plugin_macos_permissions::request_accessibility_permission().await;
-        }
-        _ => {}
+    {
+        use tauri_plugin_macos_permissions as perms;
+        let settings_url = match name.as_str() {
+            "microphone" => {
+                let _ = perms::request_microphone_permission().await;
+                tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+                if perms::check_microphone_permission().await {
+                    return;
+                }
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+            }
+            "accessibility" => {
+                perms::request_accessibility_permission().await;
+                tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+                if perms::check_accessibility_permission().await {
+                    return;
+                }
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            _ => return,
+        };
+        log::info!("no prompt appeared for {name}; opening System Settings");
+        let _ = std::process::Command::new("open").arg(settings_url).spawn();
     }
     #[cfg(not(target_os = "macos"))]
     let _ = name;
