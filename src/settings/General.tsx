@@ -6,6 +6,12 @@ type Status = {
   microphone: boolean;
   accessibility: boolean;
   modelInstalled: boolean;
+  cleanupModelInstalled: boolean;
+};
+
+type Settings = {
+  cleanupEnabled: boolean;
+  dictionary: string[];
 };
 
 type Download = {
@@ -61,6 +67,7 @@ function Row({
 export default function General() {
   const [status, setStatus] = useState<Status | null>(null);
   const [download, setDownload] = useState<Download | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
 
   const refresh = () => {
     invoke<Status>("get_status").then(setStatus).catch(console.error);
@@ -68,6 +75,7 @@ export default function General() {
 
   useEffect(() => {
     refresh();
+    invoke<Settings>("get_settings").then(setSettings).catch(console.error);
     const interval = setInterval(refresh, 3000);
     const unlisten = listen<Download>("model-download", (e) => {
       setDownload(e.payload.done ? null : e.payload);
@@ -81,6 +89,16 @@ export default function General() {
 
   const request = (name: string) =>
     invoke("request_permission", { name }).then(refresh);
+
+  const toggleCleanup = () => {
+    if (!settings) return;
+    const next = { ...settings, cleanupEnabled: !settings.cleanupEnabled };
+    setSettings(next);
+    invoke("set_settings", { newSettings: next }).catch(console.error);
+    if (next.cleanupEnabled && status && !status.cleanupModelInstalled) {
+      invoke("download_cleanup_model").then(refresh).catch(console.error);
+    }
+  };
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-3">
@@ -128,6 +146,32 @@ export default function General() {
           )}
         </>
       )}
+
+      <h2 className="mt-4 text-base font-semibold">AI cleanup</h2>
+      <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <div>
+          <p className="text-sm font-medium">Clean up transcripts</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            {status?.cleanupModelInstalled
+              ? "Qwen3 removes filler words and fixes punctuation, fully on-device"
+              : "Downloads Qwen3 (~1.1 GB) on first enable"}
+          </p>
+        </div>
+        <button
+          onClick={toggleCleanup}
+          role="switch"
+          aria-checked={settings?.cleanupEnabled ?? false}
+          className={`relative h-6 w-10 rounded-full transition-colors ${
+            settings?.cleanupEnabled ? "bg-blue-500" : "bg-neutral-300 dark:bg-neutral-600"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+              settings?.cleanupEnabled ? "left-[18px]" : "left-0.5"
+            }`}
+          />
+        </button>
+      </div>
 
       <h2 className="mt-4 text-base font-semibold">How to dictate</h2>
       <div className="rounded-lg border border-black/10 bg-white/60 px-4 py-3 text-sm leading-6 dark:border-white/10 dark:bg-white/5">

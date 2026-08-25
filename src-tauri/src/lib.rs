@@ -1,11 +1,16 @@
 mod asr;
 mod audio;
+mod cleanup;
 mod controller;
 mod hud;
 mod inject;
 mod models;
+mod settings;
 mod shortcuts;
 mod sounds;
+
+use settings::{Settings, SharedSettings};
+use std::sync::{Arc, RwLock};
 
 use serde::Serialize;
 use tauri::{
@@ -27,6 +32,46 @@ struct Status {
     microphone: bool,
     accessibility: bool,
     model_installed: bool,
+    cleanup_model_installed: bool,
+}
+
+#[tauri::command]
+fn get_settings(state: tauri::State<SharedSettings>) -> Settings {
+    state.read().unwrap().clone()
+}
+
+#[tauri::command]
+fn set_settings(
+    app: AppHandle,
+    state: tauri::State<SharedSettings>,
+    new_settings: Settings,
+) -> Result<(), String> {
+    settings::save(&app, &new_settings).map_err(|e| e.to_string())?;
+    *state.write().unwrap() = new_settings;
+    Ok(())
+}
+
+/// Fetch the cleanup model on demand (e.g. when the user flips the toggle
+/// before it ever downloaded), then warm it up.
+/// The pipeline's event sender, shareable across commands (mpsc Sender is !Sync).
+struct PipelineHandle(std::sync::Mutex<std::sync::mpsc::Sender<controller::PipelineEvent>>);
+
+impl PipelineHandle {
+    fn send(&self, event: controller::PipelineEvent) {
+        let _ = self.0.lock().unwrap().send(event);
+    }
+}
+
+/// Fetch the cleanup model on demand (e.g. when the user flips the toggle
+/// before it ever downloaded), then warm it up.
+#[tauri::command]
+async fn download_cleanup_model(
+    app: AppHandle,
+    pipeline: tauri::State<'_, PipelineHandle>,
+) -> Result<(), String> {
+    models::ensure_qwen(&app).await.map_err(|e| e.to_string())?;
+    pipeline.send(controller::PipelineEvent::PreloadCleanup);
+    Ok(())
 }
 
 #[tauri::command]
@@ -42,6 +87,7 @@ async fn get_status(app: AppHandle) -> Status {
         microphone,
         accessibility,
         model_installed: models::parakeet_installed(&app),
+        cleanup_model_installed: models::qwen_installed(&app),
     }
 }
 
@@ -86,15 +132,26 @@ pub fn run() {
     }
 
     builder
-        .invoke_handler(tauri::generate_handler![get_status, request_permission])
+        .invoke_handler(tauri::generate_handler![
+            get_status,
+            request_permission,
+            get_settings,
+            set_settings,
+            download_cleanup_model
+        ])
         .setup(|app| {
             // Menu-bar app: no Dock icon, lives in the tray.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            let shared_settings: SharedSettings =
+                Arc::new(RwLock::new(settings::load(app.handle())));
+            app.manage(shared_settings.clone());
+
             // The dictation pipeline thread + the global hotkey listener.
-            let pipeline = controller::spawn(app.handle().clone());
+            let pipeline = controller::spawn(app.handle().clone(), shared_settings.clone());
             shortcuts::spawn_listener(pipeline.clone());
+            app.manage(PipelineHandle(std::sync::Mutex::new(pipeline.clone())));
 
             let toggle = MenuItem::with_id(app, "toggle", "Start / Stop Dictation", true, None::<&str>)?;
             let settings =
@@ -139,6 +196,7 @@ pub fn run() {
             // Ask for mic/accessibility up front, then fetch + preload the ASR
             // model so the first dictation is instant.
             let handle = app.handle().clone();
+            let cleanup_enabled = shared_settings.read().unwrap().cleanup_enabled;
             tauri::async_runtime::spawn(async move {
                 #[cfg(target_os = "macos")]
                 request_permissions_on_launch().await;
@@ -147,6 +205,14 @@ pub fn run() {
                         let _ = pipeline.send(controller::PipelineEvent::PreloadModel);
                     }
                     Err(e) => log::error!("model download failed: {e:#}"),
+                }
+                if cleanup_enabled {
+                    match models::ensure_qwen(&handle).await {
+                        Ok(_) => {
+                            let _ = pipeline.send(controller::PipelineEvent::PreloadCleanup);
+                        }
+                        Err(e) => log::error!("cleanup model download failed: {e:#}"),
+                    }
                 }
             });
 

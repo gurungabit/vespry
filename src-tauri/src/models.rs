@@ -15,6 +15,11 @@ const PARAKEET_FILES: &[&str] = &[
     "vocab.txt",
 ];
 
+pub const QWEN_NAME: &str = "qwen3-1.7b-q4km";
+const QWEN_FILE: &str = "Qwen3-1.7B-Q4_K_M.gguf";
+const QWEN_URL: &str =
+    "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf";
+
 #[derive(Clone, Serialize)]
 struct DownloadProgress<'a> {
     model: &'a str,
@@ -43,6 +48,14 @@ pub fn parakeet_installed(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+pub fn qwen_path(app: &AppHandle) -> Result<PathBuf> {
+    Ok(models_root(app)?.join(QWEN_FILE))
+}
+
+pub fn qwen_installed(app: &AppHandle) -> bool {
+    qwen_path(app).map(|p| p.exists()).unwrap_or(false)
+}
+
 /// Download any missing Parakeet model files, then return the model directory.
 /// Progress is emitted as `model-download` events for the UI.
 pub async fn ensure_parakeet(app: &AppHandle) -> Result<PathBuf> {
@@ -55,11 +68,33 @@ pub async fn ensure_parakeet(app: &AppHandle) -> Result<PathBuf> {
             continue;
         }
         log::info!("downloading {file}…");
-        download(&client, &format!("{PARAKEET_BASE}/{file}"), &dest, app, file)
-            .await
-            .with_context(|| format!("downloading {file}"))?;
+        download(
+            &client,
+            &format!("{PARAKEET_BASE}/{file}"),
+            &dest,
+            app,
+            PARAKEET_DIR,
+            file,
+        )
+        .await
+        .with_context(|| format!("downloading {file}"))?;
     }
     Ok(dir)
+}
+
+/// Download the cleanup LLM if missing, then return its path.
+pub async fn ensure_qwen(app: &AppHandle) -> Result<PathBuf> {
+    let path = qwen_path(app)?;
+    if path.exists() {
+        return Ok(path);
+    }
+    tokio::fs::create_dir_all(models_root(app)?).await?;
+    log::info!("downloading {QWEN_FILE}…");
+    let client = reqwest::Client::new();
+    download(&client, QWEN_URL, &path, app, QWEN_NAME, QWEN_FILE)
+        .await
+        .with_context(|| format!("downloading {QWEN_FILE}"))?;
+    Ok(path)
 }
 
 async fn download(
@@ -67,6 +102,7 @@ async fn download(
     url: &str,
     dest: &PathBuf,
     app: &AppHandle,
+    model: &str,
     file: &str,
 ) -> Result<()> {
     let resp = client.get(url).send().await?.error_for_status()?;
@@ -86,7 +122,7 @@ async fn download(
             let _ = app.emit(
                 "model-download",
                 DownloadProgress {
-                    model: PARAKEET_DIR,
+                    model,
                     file,
                     downloaded,
                     total,
@@ -101,7 +137,7 @@ async fn download(
     let _ = app.emit(
         "model-download",
         DownloadProgress {
-            model: PARAKEET_DIR,
+            model,
             file,
             downloaded,
             total,

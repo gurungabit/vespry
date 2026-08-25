@@ -1,6 +1,9 @@
 use crate::asr::parakeet::ParakeetTranscriber;
 use crate::asr::Transcriber;
 use crate::audio::Recorder;
+use crate::cleanup::llama::LlamaCleanup;
+use crate::cleanup::{prompt, CleanupEngine};
+use crate::settings::SharedSettings;
 use crate::sounds::{self, Chime};
 use crate::{hud, inject, models};
 use serde::Serialize;
@@ -16,6 +19,8 @@ pub enum PipelineEvent {
     Toggle,
     /// Load the ASR model into memory so the first dictation is instant.
     PreloadModel,
+    /// Load the cleanup LLM into memory.
+    PreloadCleanup,
 }
 
 #[derive(Clone, Serialize)]
@@ -24,6 +29,7 @@ enum DictationState {
     Idle,
     Listening { hands_free: bool },
     Transcribing,
+    Cleaning,
     Injecting,
     Error { message: String },
 }
@@ -41,26 +47,30 @@ const MIN_SAMPLES: usize = (crate::audio::TARGET_RATE as usize) / 4;
 
 /// Spawn the pipeline thread. It owns the recorder (whose cpal stream is
 /// !Send) and the loaded ASR model, and reacts to hotkey events.
-pub fn spawn(app: AppHandle) -> Sender<PipelineEvent> {
+pub fn spawn(app: AppHandle, settings: SharedSettings) -> Sender<PipelineEvent> {
     let (tx, rx) = channel();
-    std::thread::spawn(move || run(app, rx));
+    std::thread::spawn(move || run(app, settings, rx));
     tx
 }
 
 struct Pipeline {
     app: AppHandle,
+    settings: SharedSettings,
     recorder: Recorder,
     transcriber: Option<ParakeetTranscriber>,
+    cleanup: Option<LlamaCleanup>,
     listening: bool,
     hands_free: bool,
     pressed_at: Instant,
 }
 
-fn run(app: AppHandle, rx: Receiver<PipelineEvent>) {
+fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
     let mut p = Pipeline {
         app,
+        settings,
         recorder: Recorder::new(),
         transcriber: None,
+        cleanup: None,
         listening: false,
         hands_free: false,
         pressed_at: Instant::now(),
@@ -72,6 +82,9 @@ fn run(app: AppHandle, rx: Receiver<PipelineEvent>) {
                 if p.transcriber.is_none() {
                     p.transcriber = load_transcriber(&p.app);
                 }
+            }
+            PipelineEvent::PreloadCleanup => {
+                p.ensure_cleanup_loaded();
             }
             PipelineEvent::HotkeyPressed => {
                 if p.listening {
@@ -154,6 +167,7 @@ impl Pipeline {
             Ok(text) if text.is_empty() => self.idle(),
             Ok(text) => {
                 log::info!("transcript: {text:?}");
+                let text = self.maybe_cleanup(text);
                 set_state(&self.app, DictationState::Injecting);
                 if let Err(e) = inject::inject_text(&text) {
                     self.fail(format!("couldn't insert text: {e:#}"));
@@ -162,6 +176,59 @@ impl Pipeline {
                 }
             }
             Err(e) => self.fail(format!("transcription failed: {e:#}")),
+        }
+    }
+
+    /// Run the transcript through the cleanup LLM if enabled and available.
+    /// Any failure falls back to the raw transcript — dictation must never
+    /// be lost to a flaky cleanup pass.
+    fn maybe_cleanup(&mut self, text: String) -> String {
+        let (enabled, dictionary) = {
+            let s = self.settings.read().unwrap();
+            (s.cleanup_enabled, s.dictionary.clone())
+        };
+        if !enabled {
+            return text;
+        }
+        if self.cleanup.is_none() {
+            if !models::qwen_installed(&self.app) {
+                log::info!("cleanup model not downloaded yet; inserting raw transcript");
+                return text;
+            }
+            set_state(&self.app, DictationState::Cleaning);
+            self.ensure_cleanup_loaded();
+        }
+        let Some(engine) = self.cleanup.as_mut() else {
+            return text;
+        };
+        set_state(&self.app, DictationState::Cleaning);
+        let deadline = Instant::now() + Duration::from_millis(3500);
+        match engine.cleanup(&text, &dictionary, deadline) {
+            Ok(cleaned) if prompt::acceptable(&text, &cleaned) => cleaned,
+            Ok(cleaned) => {
+                log::warn!("cleanup output rejected by guardrail: {cleaned:?}");
+                text
+            }
+            Err(e) => {
+                log::warn!("cleanup failed, inserting raw transcript: {e:#}");
+                text
+            }
+        }
+    }
+
+    fn ensure_cleanup_loaded(&mut self) {
+        if self.cleanup.is_some() {
+            return;
+        }
+        let Ok(path) = models::qwen_path(&self.app) else {
+            return;
+        };
+        if !path.exists() {
+            return;
+        }
+        match LlamaCleanup::load(&path) {
+            Ok(engine) => self.cleanup = Some(engine),
+            Err(e) => log::error!("cleanup model load failed: {e:#}"),
         }
     }
 
