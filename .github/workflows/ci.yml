@@ -9,6 +9,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # ggml (whisper.cpp/llama.cpp) needs std::filesystem; older default
+  # deployment targets make clang reject it.
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
 jobs:
   check:
     name: Build & test (macOS arm64)
