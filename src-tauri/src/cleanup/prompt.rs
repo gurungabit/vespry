@@ -83,8 +83,9 @@ pub fn acceptable(original: &str, cleaned: &str) -> bool {
     let orig_len = original.chars().count() as f32;
     let clean_len = cleaned.chars().count() as f32;
     if orig_len < 40.0 {
-        // Short utterances legitimately shrink a lot ("um, uh, send it" → "Send it.")
-        return clean_len <= orig_len * 3.0 + 20.0;
+        // Short utterances legitimately shrink a lot ("um, uh, send it" →
+        // "Send it.") but must not vanish ("Hey, what can you do?" → "Hey.").
+        return clean_len <= orig_len * 3.0 + 20.0 && clean_len >= orig_len * 0.2;
     }
     let ratio = clean_len / orig_len;
     (0.3..=1.8).contains(&ratio)
@@ -117,8 +118,10 @@ mod tests {
         ));
         assert!(!acceptable(orig, ""));
         assert!(!acceptable(orig, &"blah ".repeat(100)));
-        // A short utterance may shrink drastically.
+        // A short utterance may shrink drastically…
         assert!(acceptable("um, uh, send it", "Send it."));
+        // …but not to almost nothing.
+        assert!(!acceptable("Hey, what can you do?", "Hey."));
     }
 
     #[test]

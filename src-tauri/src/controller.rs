@@ -178,7 +178,7 @@ impl Pipeline {
                 let cleaned = (text != raw).then_some(text.as_str());
                 history::record(&self.app, &raw, cleaned);
                 set_state(&self.app, DictationState::Injecting);
-                if let Err(e) = inject::inject_text(&text) {
+                if let Err(e) = inject::inject_text(&self.app, &text) {
                     self.fail(format!("couldn't insert text: {e:#}"));
                 } else {
                     self.idle();
