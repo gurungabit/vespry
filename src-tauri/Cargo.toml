@@ -18,3 +18,18 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-pn
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+transcribe-rs = { version = "0.3.11", default-features = false, features = ["onnx"] }
+cpal = "0.16"
+rubato = "0.16"
+enigo = "0.6"
+arboard = "3.6.1"
+anyhow = "1.0.104"
+log = "0.4.34"
+env_logger = "0.11.11"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time", "fs", "io-util"] }
+futures-util = "0.3.34"
+rdev = { git = "https://github.com/rustdesk-org/rdev", version = "0.5.0-2" }
+reqwest = { version = "0.13.4", features = ["stream"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-macos-permissions = "2.3.0"
