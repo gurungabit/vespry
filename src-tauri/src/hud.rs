@@ -17,9 +17,9 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 #[cfg(target_os = "macos")]
 mod imp {
     use super::*;
-    use tauri::{Manager, WebviewUrl};
+    use tauri::Manager;
     use tauri_nspanel::{
-        tauri_panel, CollectionBehavior, ManagerExt, PanelBuilder, PanelLevel, StyleMask,
+        tauri_panel, CollectionBehavior, ManagerExt, PanelLevel, StyleMask, WebviewWindowExt,
     };
 
     tauri_panel! {
@@ -46,29 +46,26 @@ mod imp {
         }
     }
 
+    /// Convert the config-defined hidden "hud" window into a non-activating
+    /// panel. Must run on the main thread, after launch has finished.
     pub fn init(app: &AppHandle) -> tauri::Result<()> {
-        let (x, y) = bottom_center(app);
-        let panel = PanelBuilder::<_, HudPanel>::new(app, HUD_LABEL)
-            .url(WebviewUrl::App("hud.html".into()))
-            .size(tauri::Size::Logical(tauri::LogicalSize::new(HUD_W, HUD_H)))
-            .position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)))
-            .transparent(true)
-            .has_shadow(false)
-            .no_activate(true)
-            .ignores_mouse_events(true)
-            .floating(true)
-            .level(PanelLevel::Status)
-            .style_mask(StyleMask::empty().borderless().nonactivating_panel())
-            .collection_behavior(
-                CollectionBehavior::new()
-                    .can_join_all_spaces()
-                    .full_screen_auxiliary()
-                    .stationary()
-                    .ignores_cycle(),
-            )
-            .with_window(|w| w.visible(false))
-            .build()?;
-        panel.hide();
+        let window = app
+            .get_webview_window(HUD_LABEL)
+            .ok_or_else(|| tauri::Error::WindowNotFound)?;
+        let panel = window.to_panel::<HudPanel>()?;
+        panel.set_floating_panel(true);
+        panel.set_level(PanelLevel::Status.value());
+        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+        panel.set_collection_behavior(
+            CollectionBehavior::new()
+                .can_join_all_spaces()
+                .full_screen_auxiliary()
+                .stationary()
+                .ignores_cycle()
+                .into(),
+        );
+        panel.set_ignores_mouse_events(true);
+        panel.set_has_shadow(false);
         Ok(())
     }
 

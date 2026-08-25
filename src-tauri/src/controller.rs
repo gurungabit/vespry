@@ -12,6 +12,8 @@ use tauri::{AppHandle, Emitter};
 pub enum PipelineEvent {
     HotkeyPressed,
     HotkeyReleased,
+    /// Start a hands-free session, or finish the current one (tray menu).
+    Toggle,
     /// Load the ASR model into memory so the first dictation is instant.
     PreloadModel,
 }
@@ -82,6 +84,17 @@ fn run(app: AppHandle, rx: Receiver<PipelineEvent>) {
                 } else {
                     p.pressed_at = Instant::now();
                     p.start();
+                }
+            }
+            PipelineEvent::Toggle => {
+                if p.listening {
+                    p.finish();
+                } else {
+                    p.start();
+                    if p.listening {
+                        p.hands_free = true;
+                        set_state(&p.app, DictationState::Listening { hands_free: true });
+                    }
                 }
             }
             PipelineEvent::HotkeyReleased => {

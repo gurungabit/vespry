@@ -20,6 +20,25 @@
         "minWidth": 640,
         "minHeight": 480,
         "center": true
+      },
+      {
+        "label": "hud",
+        "url": "hud.html",
+        "title": "Vespry HUD",
+        "width": 300,
+        "height": 80,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": false,
+        "acceptFirstMouse": false,
+        "closable": false,
+        "minimizable": false,
+        "maximizable": false
       }
     ],
     "security": {

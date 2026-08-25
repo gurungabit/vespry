@@ -92,18 +92,27 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // The dictation pipeline thread + the global hotkey listener.
+            let pipeline = controller::spawn(app.handle().clone());
+            shortcuts::spawn_listener(pipeline.clone());
+
+            let toggle = MenuItem::with_id(app, "toggle", "Start / Stop Dictation", true, None::<&str>)?;
             let settings =
                 MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
             let separator = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Vespry", true, Some("CmdOrCtrl+Q"))?;
-            let menu = Menu::with_items(app, &[&settings, &separator, &quit])?;
+            let menu = Menu::with_items(app, &[&toggle, &settings, &separator, &quit])?;
 
+            let tray_pipeline = pipeline.clone();
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(true)
                 .menu(&menu)
                 .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
+                .on_menu_event(move |app, event| match event.id.as_ref() {
+                    "toggle" => {
+                        let _ = tray_pipeline.send(controller::PipelineEvent::Toggle);
+                    }
                     "settings" => show_settings(app),
                     "quit" => app.exit(0),
                     _ => {}
@@ -111,11 +120,21 @@ pub fn run() {
                 .build(app)?;
 
             // The floating dictation pill (hidden until dictation starts).
-            hud::init(app.handle())?;
-
-            // The dictation pipeline thread + the global hotkey listener.
-            let pipeline = controller::spawn(app.handle().clone());
-            shortcuts::spawn_listener(pipeline.clone());
+            // Created after launch finishes: building a webview panel inside
+            // setup() runs during applicationDidFinishLaunching, where a
+            // panic/objc exception aborts the process.
+            let hud_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let inner = hud_handle.clone();
+                let _ = hud_handle.run_on_main_thread(move || {
+                    log::info!("initializing HUD panel…");
+                    match hud::init(&inner) {
+                        Ok(()) => log::info!("HUD panel ready"),
+                        Err(e) => log::error!("HUD init failed: {e}"),
+                    }
+                });
+            });
 
             // Ask for mic/accessibility up front, then fetch + preload the ASR
             // model so the first dictation is instant.
