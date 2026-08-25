@@ -85,8 +85,8 @@ fn list_models(app: AppHandle) -> Vec<ModelInfo> {
     }
     list.push(ModelInfo {
         id: "qwen".into(),
-        label: "Qwen3 1.7B — transcript cleanup".into(),
-        size_mb: 1056,
+        label: "Qwen3 4B Instruct — transcript cleanup".into(),
+        size_mb: 2382,
         installed: models::qwen_installed(&app),
         kind: "cleanup".into(),
     });

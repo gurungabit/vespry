@@ -209,7 +209,7 @@ export default function General() {
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
             {status?.cleanupModelInstalled
               ? "Qwen3 removes filler words and fixes punctuation, fully on-device"
-              : "Downloads Qwen3 (~1.1 GB) on first enable"}
+              : "Downloads Qwen3 4B (~2.4 GB) on first enable"}
           </p>
         </div>
         <Toggle on={settings?.cleanupEnabled ?? false} onClick={toggleCleanup} />

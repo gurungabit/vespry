@@ -117,8 +117,9 @@ mod tests {
     #[test]
     fn cleans_filler_ridden_transcript() {
         let home = std::env::var("HOME").unwrap();
-        let gguf = std::path::PathBuf::from(home)
-            .join("Library/Application Support/com.vespry.app/models/Qwen3-1.7B-Q4_K_M.gguf");
+        let gguf = std::path::PathBuf::from(home).join(
+            "Library/Application Support/com.vespry.app/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        );
         if !gguf.exists() {
             eprintln!("skipping: cleanup model not downloaded");
             return;
@@ -146,5 +147,18 @@ mod tests {
             "not sentence-cased: {cleaned:?}"
         );
         assert!(prompt::acceptable(transcript, &cleaned));
+
+        // Regression: clean fragments must pass through, not get "improved"
+        // away (observed: "The host without the keystrokes." → "The Host.").
+        // Deliberately not one of the few-shot examples.
+        let fragment = "the config file without the comments";
+        let cleaned = engine
+            .cleanup(fragment, &[], Instant::now() + Duration::from_secs(30))
+            .expect("cleanup");
+        println!("fragment cleaned: {cleaned:?}");
+        assert!(
+            cleaned.to_lowercase().contains("without the comments"),
+            "content dropped: {cleaned:?}"
+        );
     }
 }

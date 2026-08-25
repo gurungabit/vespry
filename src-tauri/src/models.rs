@@ -15,10 +15,13 @@ const PARAKEET_FILES: &[&str] = &[
     "vocab.txt",
 ];
 
-pub const QWEN_NAME: &str = "qwen3-1.7b-q4km";
-const QWEN_FILE: &str = "Qwen3-1.7B-Q4_K_M.gguf";
+// Cleanup LLM. The 1.7B Qwen3 was too weak — it either executed transcript
+// fragments as instructions or stopped removing fillers; 4B-Instruct holds
+// both rules and is still sub-second on Apple Silicon.
+pub const QWEN_NAME: &str = "qwen3-4b-instruct-q4km";
+const QWEN_FILE: &str = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
 const QWEN_URL: &str =
-    "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf";
+    "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
 
 /// Curated whisper.cpp models (multilingual, ggml format).
 pub struct WhisperModel {

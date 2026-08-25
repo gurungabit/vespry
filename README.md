@@ -11,7 +11,7 @@ Inspired by Wispr Flow; architecture informed by the MIT-licensed [Handy](https:
 
 - **Hold right ⌘** (configurable: right ⌥, Fn, left ⌃, F5) to talk; release to insert at the cursor. Quick-tap for hands-free mode — tap again to finish. Also triggerable from the menu-bar tray.
 - **ASR engines:** NVIDIA Parakeet TDT 0.6b v3 (ONNX, default — sub-second, 25 European languages) or whisper.cpp (Metal — base/small/large-v3-turbo, ~100 languages with a language hint).
-- **AI cleanup:** Qwen3-1.7B (llama.cpp, Metal) removes filler words and false starts, fixes punctuation, and applies your custom dictionary. Guardrailed: any failure or over-rewrite falls back to the raw transcript.
+- **AI cleanup:** Qwen3-4B-Instruct (llama.cpp, Metal) removes filler words and false starts, fixes punctuation, and applies your custom dictionary. Guardrailed: any failure or over-rewrite falls back to the raw transcript.
 - **Wispr-style HUD:** a non-activating floating pill with a live waveform — never steals focus, shows on every Space including fullscreen apps.
 - **History** (last 500 dictations, raw + cleaned), custom dictionary, chimes, launch at login.
 
@@ -19,7 +19,7 @@ Inspired by Wispr Flow; architecture informed by the MIT-licensed [Handy](https:
 
 - macOS 14+ on Apple Silicon (developed on macOS 26)
 - Permissions: Microphone + Accessibility (for the global hotkey and text insertion)
-- Models download on first run into `~/Library/Application Support/com.vespry.app/models` (~640 MB Parakeet + ~1.1 GB Qwen3; whisper models on demand)
+- Models download on first run into `~/Library/Application Support/com.vespry.app/models` (~640 MB Parakeet + ~2.4 GB Qwen3; whisper models on demand)
 
 ## Development
 
