@@ -1,0 +1,52 @@
+name: Release
+
+# Cut a release by pushing a version tag (scripts/release.sh does the
+# bookkeeping), or run it manually from the Actions tab.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish (macOS arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Vespry ${{ github.ref_name }}"
+          releaseBody: |
+            On-device dictation for macOS (Apple Silicon).
+
+            **Install:** download the `.dmg`, drag Vespry to Applications. The build is unsigned — on first launch, right-click the app → Open (or run `xattr -dr com.apple.quarantine /Applications/Vespry.app`).
+
+            Models (~2 GB) download on first run. Grant Microphone + Accessibility when prompted.
+          releaseDraft: false
+          prerelease: false

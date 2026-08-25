@@ -248,7 +248,8 @@ pub fn run() {
             shortcuts::spawn_listener(pipeline.clone(), shared_settings.clone());
             app.manage(PipelineHandle(std::sync::Mutex::new(pipeline.clone())));
 
-            let toggle = MenuItem::with_id(app, "toggle", "Start / Stop Dictation", true, None::<&str>)?;
+            let toggle =
+                MenuItem::with_id(app, "toggle", "Start / Stop Dictation", true, None::<&str>)?;
             let settings =
                 MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
             let separator = PredefinedMenuItem::separator(app)?;

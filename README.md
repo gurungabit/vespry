@@ -1,5 +1,8 @@
 # Vespry
 
+[![CI](https://github.com/gurungabit/vespry/actions/workflows/ci.yml/badge.svg)](https://github.com/gurungabit/vespry/actions/workflows/ci.yml)
+[![Release](https://github.com/gurungabit/vespry/actions/workflows/release.yml/badge.svg)](https://github.com/gurungabit/vespry/releases)
+
 Local, private dictation for your Mac (Windows/Linux planned). Hold a key, speak, release — your words are transcribed on-device, cleaned up by a local LLM, and typed into whatever app you're using. No audio ever leaves your machine.
 
 Inspired by Wispr Flow; architecture informed by the MIT-licensed [Handy](https://github.com/cjpais/Handy).
@@ -37,3 +40,15 @@ Tests (headless — synthesize speech with `say`, run it through both ASR engine
 ```
 cd src-tauri && cargo test --lib
 ```
+
+## Releases
+
+Grab the latest DMG from [Releases](https://github.com/gurungabit/vespry/releases). Builds are unsigned for now — right-click → Open on first launch, or `xattr -dr com.apple.quarantine /Applications/Vespry.app`.
+
+To cut a release:
+
+```
+scripts/release.sh 0.2.0
+```
+
+That bumps the version in `package.json`, `tauri.conf.json`, and `Cargo.toml`, commits, tags `v0.2.0`, and pushes — the Release workflow then builds the app on a macOS runner and publishes the DMG to GitHub Releases automatically.

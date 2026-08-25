@@ -26,7 +26,10 @@ impl LlamaCleanup {
         let params = LlamaModelParams::default().with_n_gpu_layers(1_000_000);
         let model = LlamaModel::load_from_file(&backend, gguf_path, &params)
             .with_context(|| format!("loading {}", gguf_path.display()))?;
-        log::info!("cleanup LLM loaded in {:.2}s", started.elapsed().as_secs_f32());
+        log::info!(
+            "cleanup LLM loaded in {:.2}s",
+            started.elapsed().as_secs_f32()
+        );
         Ok(Self { backend, model })
     }
 
@@ -51,7 +54,8 @@ impl LlamaCleanup {
         for (i, token) in (0i32..).zip(tokens.iter()) {
             batch.add(*token, i, &[0], i == last)?;
         }
-        ctx.decode(&mut batch).map_err(|e| anyhow!("prefill: {e}"))?;
+        ctx.decode(&mut batch)
+            .map_err(|e| anyhow!("prefill: {e}"))?;
 
         // Greedy: cleanup is a deterministic rewriting task, not creative writing.
         let mut sampler = LlamaSampler::greedy();
@@ -90,8 +94,7 @@ impl CleanupEngine for LlamaCleanup {
         deadline: Instant,
     ) -> Result<String> {
         let started = Instant::now();
-        let full_prompt =
-            prompt::build_chatml(&prompt::system_prompt(dictionary), transcript);
+        let full_prompt = prompt::build_chatml(&prompt::system_prompt(dictionary), transcript);
         let raw = self.generate(&full_prompt, deadline)?;
         let cleaned = prompt::postprocess(&raw);
         log::info!(
@@ -128,9 +131,15 @@ mod tests {
             .expect("cleanup");
         println!("cleaned: {cleaned:?}");
         let lower = cleaned.to_lowercase();
-        assert!(lower.contains("ship the feature tomorrow"), "got: {cleaned:?}");
+        assert!(
+            lower.contains("ship the feature tomorrow"),
+            "got: {cleaned:?}"
+        );
         for filler in ["um", "uh ", "you know", "basically"] {
-            assert!(!lower.contains(filler), "filler {filler:?} survived: {cleaned:?}");
+            assert!(
+                !lower.contains(filler),
+                "filler {filler:?} survived: {cleaned:?}"
+            );
         }
         assert!(
             cleaned.chars().next().unwrap().is_uppercase() && cleaned.ends_with('.'),

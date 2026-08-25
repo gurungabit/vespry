@@ -265,7 +265,11 @@ impl Pipeline {
     fn ensure_transcriber(&mut self) {
         let (engine, whisper_model, language) = {
             let s = self.settings.read().unwrap();
-            (s.engine.clone(), s.whisper_model.clone(), s.language.clone())
+            (
+                s.engine.clone(),
+                s.whisper_model.clone(),
+                s.language.clone(),
+            )
         };
         let desired_key = match engine.as_str() {
             "whisper" => format!(
@@ -279,10 +283,8 @@ impl Pipeline {
         }
         self.transcriber = None; // free the old model before loading the new one
         let loaded: Option<Box<dyn Transcriber>> = if engine == "whisper" {
-            match tauri::async_runtime::block_on(models::ensure_whisper(
-                &self.app,
-                &whisper_model,
-            )) {
+            match tauri::async_runtime::block_on(models::ensure_whisper(&self.app, &whisper_model))
+            {
                 Ok(path) => match WhisperTranscriber::load(&path, language) {
                     Ok(t) => Some(Box::new(t)),
                     Err(e) => {

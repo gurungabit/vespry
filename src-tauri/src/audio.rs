@@ -80,11 +80,8 @@ impl Recorder {
             move |data: &[T], _| {
                 let mut buf = buf.lock().unwrap();
                 for frame in data.chunks(channels) {
-                    let mono = frame
-                        .iter()
-                        .map(|s| f32::from_sample(*s))
-                        .sum::<f32>()
-                        / channels as f32;
+                    let mono =
+                        frame.iter().map(|s| f32::from_sample(*s)).sum::<f32>() / channels as f32;
                     buf.push(mono);
                     level_acc += mono * mono;
                     since_emit += 1;
@@ -122,8 +119,7 @@ fn resample_to_16k(input: &[f32], from_rate: u32) -> Result<Vec<f32>> {
         return Ok(input.to_vec());
     }
     use rubato::{
-        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
-        WindowFunction,
+        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
     };
     let params = SincInterpolationParameters {
         sinc_len: 128,
@@ -133,14 +129,9 @@ fn resample_to_16k(input: &[f32], from_rate: u32) -> Result<Vec<f32>> {
         window: WindowFunction::BlackmanHarris2,
     };
     const CHUNK: usize = 1024;
-    let mut rs = SincFixedIn::<f32>::new(
-        TARGET_RATE as f64 / from_rate as f64,
-        2.0,
-        params,
-        CHUNK,
-        1,
-    )
-    .map_err(|e| anyhow!("resampler init: {e}"))?;
+    let mut rs =
+        SincFixedIn::<f32>::new(TARGET_RATE as f64 / from_rate as f64, 2.0, params, CHUNK, 1)
+            .map_err(|e| anyhow!("resampler init: {e}"))?;
     let mut out =
         Vec::with_capacity(input.len() * TARGET_RATE as usize / from_rate as usize + CHUNK);
     for chunk in input.chunks(CHUNK) {

@@ -102,13 +102,19 @@ mod tests {
         );
         assert_eq!(postprocess("  Hello world.  "), "Hello world.");
         // Quotes that are part of the text (not wrapping) survive.
-        assert_eq!(postprocess("She said \"hi\" to me"), "She said \"hi\" to me");
+        assert_eq!(
+            postprocess("She said \"hi\" to me"),
+            "She said \"hi\" to me"
+        );
     }
 
     #[test]
     fn acceptable_rejects_runaways() {
         let orig = "um so basically I think we should uh ship the feature tomorrow you know";
-        assert!(acceptable(orig, "I think we should ship the feature tomorrow."));
+        assert!(acceptable(
+            orig,
+            "I think we should ship the feature tomorrow."
+        ));
         assert!(!acceptable(orig, ""));
         assert!(!acceptable(orig, &"blah ".repeat(100)));
         // A short utterance may shrink drastically.

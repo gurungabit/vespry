@@ -8,6 +8,10 @@ use std::time::Instant;
 /// respect `deadline` — past it, stop generating and return what they have
 /// (the caller falls back to the raw transcript if the result is unusable).
 pub trait CleanupEngine: Send {
-    fn cleanup(&mut self, transcript: &str, dictionary: &[String], deadline: Instant)
-        -> Result<String>;
+    fn cleanup(
+        &mut self,
+        transcript: &str,
+        dictionary: &[String],
+        deadline: Instant,
+    ) -> Result<String>;
 }
