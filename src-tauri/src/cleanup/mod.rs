@@ -12,6 +12,7 @@ pub trait CleanupEngine: Send {
         &mut self,
         transcript: &str,
         dictionary: &[String],
+        smart_formatting: bool,
         deadline: Instant,
     ) -> Result<String>;
 }

@@ -21,6 +21,8 @@ pub struct Settings {
     pub hotkey: String,
     /// Play start/stop chimes.
     pub sounds_enabled: bool,
+    /// Let cleanup format spoken enumerations as Markdown lists.
+    pub smart_formatting: bool,
 }
 
 impl Default for Settings {
@@ -33,6 +35,7 @@ impl Default for Settings {
             language: None,
             hotkey: "right-cmd".into(),
             sounds_enabled: true,
+            smart_formatting: true,
         }
     }
 }

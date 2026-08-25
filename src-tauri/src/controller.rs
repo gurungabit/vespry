@@ -192,9 +192,9 @@ impl Pipeline {
     /// Any failure falls back to the raw transcript — dictation must never
     /// be lost to a flaky cleanup pass.
     fn maybe_cleanup(&mut self, text: String) -> String {
-        let (enabled, dictionary) = {
+        let (enabled, dictionary, smart_formatting) = {
             let s = self.settings.read().unwrap();
-            (s.cleanup_enabled, s.dictionary.clone())
+            (s.cleanup_enabled, s.dictionary.clone(), s.smart_formatting)
         };
         if !enabled {
             return text;
@@ -212,7 +212,7 @@ impl Pipeline {
         };
         set_state(&self.app, DictationState::Cleaning);
         let deadline = Instant::now() + Duration::from_millis(3500);
-        match engine.cleanup(&text, &dictionary, deadline) {
+        match engine.cleanup(&text, &dictionary, smart_formatting, deadline) {
             Ok(cleaned) if prompt::acceptable(&text, &cleaned) => cleaned,
             Ok(cleaned) => {
                 log::warn!("cleanup output rejected by guardrail: {cleaned:?}");

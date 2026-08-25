@@ -17,6 +17,7 @@ type Settings = {
   language: string | null;
   hotkey: string;
   soundsEnabled: boolean;
+  smartFormatting: boolean;
 };
 
 const HOTKEYS: [string, string][] = [
@@ -218,6 +219,24 @@ export default function General() {
         </div>
         <Toggle on={settings?.cleanupEnabled ?? false} onClick={toggleCleanup} />
       </div>
+      {settings?.cleanupEnabled && (
+        <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+          <div>
+            <p className="text-sm font-medium">Format lists automatically</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Counting items off ("first… second… third") becomes a bulleted or
+              numbered list
+            </p>
+          </div>
+          <Toggle
+            on={settings?.smartFormatting ?? true}
+            onClick={() =>
+              settings &&
+              save({ ...settings, smartFormatting: !settings.smartFormatting })
+            }
+          />
+        </div>
+      )}
 
       <h2 className="mt-4 text-base font-semibold">Behavior</h2>
       <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">

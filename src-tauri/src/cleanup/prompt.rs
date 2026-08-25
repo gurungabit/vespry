@@ -1,6 +1,6 @@
 //! Prompt construction and output guardrails for the cleanup LLM.
 
-pub fn system_prompt(dictionary: &[String]) -> String {
+pub fn system_prompt(dictionary: &[String], smart_formatting: bool) -> String {
     let mut p = String::from(
         "You clean up raw speech-to-text transcripts for a dictation app. \
          Rewrite the transcript as clean written text: remove filler words and \
@@ -16,6 +16,18 @@ pub fn system_prompt(dictionary: &[String]) -> String {
          punctuation. Output only the cleaned text, with no quotes and no \
          commentary.",
     );
+    if smart_formatting {
+        p.push_str(
+            " When the speaker is clearly enumerating items — counting them off \
+             (\"first… second… third\", \"number one… number two\") or saying \
+             something like \"here's the list\" or \"three things:\" — format \
+             the items as a Markdown list, one item per line, using \"- \" for \
+             unordered items and \"1. \" numbering when the speaker used \
+             ordinals. Keep any lead-in sentence as a line above the list. \
+             Only do this for genuine enumerations: ordinary sentences that \
+             merely mention several things stay as prose.",
+        );
+    }
     if !dictionary.is_empty() {
         p.push_str("\nPrefer these spellings when they match what was said: ");
         p.push_str(&dictionary.join(", "));
@@ -23,6 +35,21 @@ pub fn system_prompt(dictionary: &[String]) -> String {
     }
     p
 }
+
+/// Extra demonstrations shown only when smart formatting is on. The prose
+/// example is as important as the list one — without it the model turns every
+/// sentence that mentions two things into bullets.
+const FORMATTING_EXAMPLES: &[(&str, &str)] = &[
+    (
+        "okay so three things we need to do first fix the login bug second update the docs \
+         and third cut a release",
+        "Three things we need to do:\n1. Fix the login bug\n2. Update the docs\n3. Cut a release",
+    ),
+    (
+        "grab milk eggs and some bread on your way home",
+        "Grab milk, eggs, and some bread on your way home.",
+    ),
+];
 
 /// Few-shot examples: small models follow demonstrations far better than
 /// instructions alone.
@@ -54,16 +81,23 @@ fn user_message(raw: &str) -> String {
         "Transcript:\n\"\"\"\n{raw}\n\"\"\"\nRewrite it as clean written text: \
          remove all fillers (um, uh, like, you know, I mean, so, basically, \
          actually) and repeated words, fix punctuation and capitalization, \
-         and keep every content word unchanged."
+         and keep every content word unchanged. Format a genuine enumeration \
+         as a Markdown list; leave ordinary prose as prose."
     )
 }
 
 /// Qwen-style ChatML with few-shot turns. (Qwen3-*-Instruct-2507 models are
 /// non-thinking, so no think-block prefill is needed; postprocess still
 /// strips one defensively.)
-pub fn build_chatml(system: &str, user: &str) -> String {
+pub fn build_chatml(system: &str, user: &str, smart_formatting: bool) -> String {
     let mut p = format!("<|im_start|>system\n{system}<|im_end|>\n");
-    for (raw, clean) in EXAMPLES {
+    let examples = EXAMPLES.iter().chain(
+        smart_formatting
+            .then_some(FORMATTING_EXAMPLES)
+            .unwrap_or(&[])
+            .iter(),
+    );
+    for (raw, clean) in examples {
         p.push_str(&format!(
             "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n{clean}<|im_end|>\n",
             user_message(raw)
@@ -222,7 +256,7 @@ mod tests {
 
     #[test]
     fn dictionary_lands_in_system_prompt() {
-        let p = system_prompt(&["Vespry".into(), "Tauri".into()]);
+        let p = system_prompt(&["Vespry".into(), "Tauri".into()], false);
         assert!(p.contains("Vespry, Tauri"));
     }
 }
