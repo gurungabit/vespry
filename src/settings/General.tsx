@@ -166,7 +166,11 @@ export default function General() {
           <Row
             ok={status.accessibility}
             label="Accessibility"
-            detail="Needed for the hotkey and to type into other apps"
+            detail={
+              status.accessibility
+                ? "Needed to type into other apps"
+                : "Needed to type into other apps. Already granted? An app update invalidates the old grant — toggle Vespry off and on in System Settings → Accessibility, then relaunch."
+            }
             action="Grant"
             onAction={() => request("accessibility")}
           />

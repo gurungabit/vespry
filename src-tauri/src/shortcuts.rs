@@ -6,32 +6,48 @@ use std::time::Duration;
 /// On macOS we don't listen for key events at all: rdev derives modifier
 /// press/release from numeric comparisons of raw CGEventFlags, which
 /// misclassifies holds of modifier-only hotkeys (right ⌘ reads as a stream
-/// of taps). Instead we poll the physical key state via
-/// CGEventSourceKeyState — ground truth, ~33 ms latency, no event tap and
-/// no Accessibility needed for the hotkey itself.
+/// of taps). Instead we poll the current modifier-flags state — the same
+/// source NSEvent.modifierFlags reads — which needs no event tap and no
+/// permissions, with ~33 ms latency.
 #[cfg(target_os = "macos")]
 mod macos {
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
+        fn CGEventSourceFlagsState(state_id: i32) -> u64;
         fn CGEventSourceKeyState(state_id: i32, key: u16) -> bool;
     }
 
-    /// kCGEventSourceStateHIDSystemState
-    const HID_STATE: i32 = 1;
+    /// kCGEventSourceStateCombinedSessionState
+    const COMBINED_SESSION: i32 = 0;
 
-    /// Virtual keycodes for the hotkey ids offered in settings.
-    pub fn keycode_from_id(id: &str) -> u16 {
+    pub enum Hotkey {
+        /// A modifier key, detected via its device-dependent flag bit.
+        Flag(u64),
+        /// A regular key, detected via its virtual keycode.
+        Key(u16),
+    }
+
+    pub fn hotkey_from_id(id: &str) -> Hotkey {
         match id {
-            "right-alt" => 0x3D, // right option
-            "fn" => 0x3F,        // fn/globe
-            "left-ctrl" => 0x3B, // left control
-            "f5" => 0x60,        // F5
-            _ => 0x36,           // right command ("right-cmd" and the fallback)
+            "right-alt" => Hotkey::Flag(0x40), // NX_DEVICERALTKEYMASK
+            "fn" => Hotkey::Flag(0x0080_0000), // NSEventModifierFlagFunction
+            "left-ctrl" => Hotkey::Flag(0x01), // NX_DEVICELCTLKEYMASK
+            "f5" => Hotkey::Key(0x60),         // kVK_F5
+            _ => Hotkey::Flag(0x10),           // NX_DEVICERCMDKEYMASK (right ⌘)
         }
     }
 
-    pub fn key_is_down(keycode: u16) -> bool {
-        unsafe { CGEventSourceKeyState(HID_STATE, keycode) }
+    pub fn is_down(hotkey: &Hotkey) -> bool {
+        unsafe {
+            match hotkey {
+                Hotkey::Flag(bit) => CGEventSourceFlagsState(COMBINED_SESSION) & bit != 0,
+                Hotkey::Key(code) => CGEventSourceKeyState(COMBINED_SESSION, *code),
+            }
+        }
+    }
+
+    pub fn raw_flags() -> u64 {
+        unsafe { CGEventSourceFlagsState(COMBINED_SESSION) }
     }
 }
 
@@ -39,12 +55,18 @@ mod macos {
 pub fn spawn_listener(tx: Sender<PipelineEvent>, settings: SharedSettings) {
     std::thread::spawn(move || {
         let mut held = false;
+        let mut last_flags = macos::raw_flags();
         loop {
-            let keycode = macos::keycode_from_id(&settings.read().unwrap().hotkey);
-            let down = macos::key_is_down(keycode);
+            let hotkey = macos::hotkey_from_id(&settings.read().unwrap().hotkey);
+            let flags = macos::raw_flags();
+            if flags != last_flags {
+                log::debug!("modifier flags {last_flags:#x} -> {flags:#x}");
+                last_flags = flags;
+            }
+            let down = macos::is_down(&hotkey);
             if down != held {
                 held = down;
-                log::debug!("hotkey {}", if down { "down" } else { "up" });
+                log::info!("hotkey {}", if down { "down" } else { "up" });
                 let event = if down {
                     PipelineEvent::HotkeyPressed
                 } else {

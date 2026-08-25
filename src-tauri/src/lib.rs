@@ -135,8 +135,6 @@ async fn download_model(app: AppHandle, id: String) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-/// Fetch the cleanup model on demand (e.g. when the user flips the toggle
-/// before it ever downloaded), then warm it up.
 /// The pipeline's event sender, shareable across commands (mpsc Sender is !Sync).
 struct PipelineHandle(std::sync::Mutex<std::sync::mpsc::Sender<controller::PipelineEvent>>);
 
@@ -203,9 +201,41 @@ async fn request_permissions_on_launch() {
     }
 }
 
+/// Log to stderr when attached to a terminal (dev), otherwise to
+/// ~/Library/Application Support/com.vespry.app/vespry.log so Finder-launched
+/// builds stay debuggable.
+fn init_logging() {
+    use std::io::IsTerminal;
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    if !std::io::stderr().is_terminal() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let dir =
+                std::path::PathBuf::from(home).join("Library/Application Support/com.vespry.app");
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join("vespry.log");
+            // Start fresh once the log gets big; it's a debug aid, not an archive.
+            if std::fs::metadata(&path)
+                .map(|m| m.len() > 5_000_000)
+                .unwrap_or(false)
+            {
+                let _ = std::fs::remove_file(&path);
+            }
+            if let Ok(file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                builder.target(env_logger::Target::Pipe(Box::new(file)));
+            }
+        }
+    }
+    builder.init();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    init_logging();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
