@@ -1,4 +1,5 @@
 pub mod parakeet;
+pub mod whisper;
 
 use anyhow::Result;
 

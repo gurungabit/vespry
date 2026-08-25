@@ -48,7 +48,58 @@ fn set_settings(
 ) -> Result<(), String> {
     settings::save(&app, &new_settings).map_err(|e| e.to_string())?;
     *state.write().unwrap() = new_settings;
+    // Reload models eagerly so an engine switch doesn't stall the next dictation.
+    app.state::<PipelineHandle>()
+        .send(controller::PipelineEvent::PreloadModel);
     Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelInfo {
+    id: String,
+    label: String,
+    size_mb: u32,
+    installed: bool,
+    kind: String,
+}
+
+#[tauri::command]
+fn list_models(app: AppHandle) -> Vec<ModelInfo> {
+    let mut list = vec![ModelInfo {
+        id: "parakeet".into(),
+        label: "Parakeet v3 — fastest, 25 European languages".into(),
+        size_mb: 670,
+        installed: models::parakeet_installed(&app),
+        kind: "asr".into(),
+    }];
+    for m in models::WHISPER_MODELS {
+        list.push(ModelInfo {
+            id: m.id.into(),
+            label: m.label.into(),
+            size_mb: m.size_mb,
+            installed: models::whisper_installed(&app, m.id),
+            kind: "asr".into(),
+        });
+    }
+    list.push(ModelInfo {
+        id: "qwen".into(),
+        label: "Qwen3 1.7B — transcript cleanup".into(),
+        size_mb: 1056,
+        installed: models::qwen_installed(&app),
+        kind: "cleanup".into(),
+    });
+    list
+}
+
+#[tauri::command]
+async fn download_model(app: AppHandle, id: String) -> Result<(), String> {
+    match id.as_str() {
+        "parakeet" => models::ensure_parakeet(&app).await.map(|_| ()),
+        "qwen" => models::ensure_qwen(&app).await.map(|_| ()),
+        other => models::ensure_whisper(&app, other).await.map(|_| ()),
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Fetch the cleanup model on demand (e.g. when the user flips the toggle
@@ -137,7 +188,9 @@ pub fn run() {
             request_permission,
             get_settings,
             set_settings,
-            download_cleanup_model
+            download_cleanup_model,
+            list_models,
+            download_model
         ])
         .setup(|app| {
             // Menu-bar app: no Dock icon, lives in the tray.

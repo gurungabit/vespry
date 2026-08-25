@@ -11,6 +11,12 @@ pub struct Settings {
     pub cleanup_enabled: bool,
     /// Names/terms the cleanup model should prefer the given spellings of.
     pub dictionary: Vec<String>,
+    /// ASR engine: "parakeet" (default) or "whisper".
+    pub engine: String,
+    /// Which whisper model to use when engine is "whisper".
+    pub whisper_model: String,
+    /// Spoken-language hint for whisper (BCP-47, e.g. "ja"); None = auto-detect.
+    pub language: Option<String>,
 }
 
 impl Default for Settings {
@@ -18,6 +24,9 @@ impl Default for Settings {
         Self {
             cleanup_enabled: true,
             dictionary: Vec::new(),
+            engine: "parakeet".into(),
+            whisper_model: "small".into(),
+            language: None,
         }
     }
 }

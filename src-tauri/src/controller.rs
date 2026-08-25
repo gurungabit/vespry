@@ -1,4 +1,5 @@
 use crate::asr::parakeet::ParakeetTranscriber;
+use crate::asr::whisper::WhisperTranscriber;
 use crate::asr::Transcriber;
 use crate::audio::Recorder;
 use crate::cleanup::llama::LlamaCleanup;
@@ -57,7 +58,9 @@ struct Pipeline {
     app: AppHandle,
     settings: SharedSettings,
     recorder: Recorder,
-    transcriber: Option<ParakeetTranscriber>,
+    transcriber: Option<Box<dyn Transcriber>>,
+    /// Which engine/model/language combination `transcriber` was loaded for.
+    loaded_key: String,
     cleanup: Option<LlamaCleanup>,
     listening: bool,
     hands_free: bool,
@@ -70,6 +73,7 @@ fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
         settings,
         recorder: Recorder::new(),
         transcriber: None,
+        loaded_key: String::new(),
         cleanup: None,
         listening: false,
         hands_free: false,
@@ -79,9 +83,7 @@ fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
     for event in rx {
         match event {
             PipelineEvent::PreloadModel => {
-                if p.transcriber.is_none() {
-                    p.transcriber = load_transcriber(&p.app);
-                }
+                p.ensure_transcriber();
             }
             PipelineEvent::PreloadCleanup => {
                 p.ensure_cleanup_loaded();
@@ -156,9 +158,7 @@ impl Pipeline {
             return;
         }
         set_state(&self.app, DictationState::Transcribing);
-        if self.transcriber.is_none() {
-            self.transcriber = load_transcriber(&self.app);
-        }
+        self.ensure_transcriber();
         let Some(t) = self.transcriber.as_mut() else {
             self.fail("speech model unavailable".to_string());
             return;
@@ -250,25 +250,65 @@ impl Pipeline {
     }
 }
 
+impl Pipeline {
+    /// Make sure the loaded transcriber matches the current settings,
+    /// (re)loading and downloading models as needed.
+    fn ensure_transcriber(&mut self) {
+        let (engine, whisper_model, language) = {
+            let s = self.settings.read().unwrap();
+            (s.engine.clone(), s.whisper_model.clone(), s.language.clone())
+        };
+        let desired_key = match engine.as_str() {
+            "whisper" => format!(
+                "whisper:{whisper_model}:{}",
+                language.as_deref().unwrap_or("auto")
+            ),
+            _ => "parakeet".to_string(),
+        };
+        if self.transcriber.is_some() && self.loaded_key == desired_key {
+            return;
+        }
+        self.transcriber = None; // free the old model before loading the new one
+        let loaded: Option<Box<dyn Transcriber>> = if engine == "whisper" {
+            match tauri::async_runtime::block_on(models::ensure_whisper(
+                &self.app,
+                &whisper_model,
+            )) {
+                Ok(path) => match WhisperTranscriber::load(&path, language) {
+                    Ok(t) => Some(Box::new(t)),
+                    Err(e) => {
+                        fail(&self.app, format!("whisper load failed: {e:#}"));
+                        None
+                    }
+                },
+                Err(e) => {
+                    fail(&self.app, format!("whisper download failed: {e:#}"));
+                    None
+                }
+            }
+        } else {
+            match tauri::async_runtime::block_on(models::ensure_parakeet(&self.app)) {
+                Ok(dir) => match ParakeetTranscriber::load(&dir) {
+                    Ok(t) => Some(Box::new(t)),
+                    Err(e) => {
+                        fail(&self.app, format!("model load failed: {e:#}"));
+                        None
+                    }
+                },
+                Err(e) => {
+                    fail(&self.app, format!("model download failed: {e:#}"));
+                    None
+                }
+            }
+        };
+        if loaded.is_some() {
+            self.loaded_key = desired_key;
+        }
+        self.transcriber = loaded;
+    }
+}
+
 fn fail(app: &AppHandle, message: String) {
     log::error!("{message}");
     set_state(app, DictationState::Error { message });
-}
-
-fn load_transcriber(app: &AppHandle) -> Option<ParakeetTranscriber> {
-    // Downloads any missing model files first (no-op once installed).
-    let dir = match tauri::async_runtime::block_on(models::ensure_parakeet(app)) {
-        Ok(dir) => dir,
-        Err(e) => {
-            fail(app, format!("model download failed: {e:#}"));
-            return None;
-        }
-    };
-    match ParakeetTranscriber::load(&dir) {
-        Ok(t) => Some(t),
-        Err(e) => {
-            fail(app, format!("model load failed: {e:#}"));
-            None
-        }
-    }
 }

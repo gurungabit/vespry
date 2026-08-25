@@ -20,6 +20,73 @@ const QWEN_FILE: &str = "Qwen3-1.7B-Q4_K_M.gguf";
 const QWEN_URL: &str =
     "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf";
 
+/// Curated whisper.cpp models (multilingual, ggml format).
+pub struct WhisperModel {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub file: &'static str,
+    pub size_mb: u32,
+}
+
+pub const WHISPER_MODELS: &[WhisperModel] = &[
+    WhisperModel {
+        id: "base",
+        label: "Whisper Base — fastest, rough",
+        file: "ggml-base.bin",
+        size_mb: 142,
+    },
+    WhisperModel {
+        id: "small",
+        label: "Whisper Small — balanced",
+        file: "ggml-small.bin",
+        size_mb: 466,
+    },
+    WhisperModel {
+        id: "large-v3-turbo-q5_0",
+        label: "Whisper Large v3 Turbo (q5) — best quality",
+        file: "ggml-large-v3-turbo-q5_0.bin",
+        size_mb: 547,
+    },
+];
+
+const WHISPER_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+
+pub fn whisper_model(id: &str) -> Option<&'static WhisperModel> {
+    WHISPER_MODELS.iter().find(|m| m.id == id)
+}
+
+pub fn whisper_path(app: &AppHandle, id: &str) -> Result<PathBuf> {
+    let model = whisper_model(id).context("unknown whisper model")?;
+    Ok(models_root(app)?.join(model.file))
+}
+
+pub fn whisper_installed(app: &AppHandle, id: &str) -> bool {
+    whisper_path(app, id).map(|p| p.exists()).unwrap_or(false)
+}
+
+/// Download a whisper model if missing, then return its path.
+pub async fn ensure_whisper(app: &AppHandle, id: &str) -> Result<PathBuf> {
+    let model = whisper_model(id).context("unknown whisper model")?;
+    let path = whisper_path(app, id)?;
+    if path.exists() {
+        return Ok(path);
+    }
+    tokio::fs::create_dir_all(models_root(app)?).await?;
+    log::info!("downloading {}…", model.file);
+    let client = reqwest::Client::new();
+    download(
+        &client,
+        &format!("{WHISPER_BASE_URL}/{}", model.file),
+        &path,
+        app,
+        id,
+        model.file,
+    )
+    .await
+    .with_context(|| format!("downloading {}", model.file))?;
+    Ok(path)
+}
+
 #[derive(Clone, Serialize)]
 struct DownloadProgress<'a> {
     model: &'a str,
