@@ -1,0 +1,5 @@
+# ggml (whisper.cpp / llama.cpp) uses std::filesystem, which clang gates
+# behind macOS 10.15+. Tauri's bundler otherwise exports a 10.13 deployment
+# target to build scripts, which breaks their cmake builds.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "14.0"

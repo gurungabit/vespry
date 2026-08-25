@@ -3,26 +3,10 @@ import General from "./settings/General";
 import Models from "./settings/Models";
 import Dictionary from "./settings/Dictionary";
 import History from "./settings/History";
+import About from "./settings/About";
 
 const TABS = ["General", "Models", "Dictionary", "History", "About"] as const;
 type Tab = (typeof TABS)[number];
-
-const TAB_ICONS: Record<Tab, string> = {
-  General: "⚙︎",
-  Models: "⬇︎",
-  Dictionary: "📖",
-  History: "🕘",
-  About: "ℹ︎",
-};
-
-function Placeholder({ tab }: { tab: Tab }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-neutral-400">
-      <span className="text-3xl">{TAB_ICONS[tab]}</span>
-      <p className="text-sm">{tab} — coming soon</p>
-    </div>
-  );
-}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("General");
@@ -55,7 +39,7 @@ export default function App() {
         ) : tab === "History" ? (
           <History />
         ) : (
-          <Placeholder tab={tab} />
+          <About />
         )}
       </main>
     </div>
