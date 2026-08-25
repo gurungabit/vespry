@@ -35,6 +35,22 @@ pnpm tauri build
 open src-tauri/target/release/bundle/macos/Vespry.app
 ```
 
+Model downloads use `https://huggingface.co` by default. On networks that require an internal Hugging Face mirror, set its endpoint when running or building the app (the mirror must preserve Hugging Face's `<repo>/resolve/main/<file>` URL layout). Authenticated mirrors can receive a bearer token through `VESPRY_HF_TOKEN` (or the standard `HF_TOKEN`):
+
+```
+VESPRY_HF_ENDPOINT=https://your-internal-hugging-face-endpoint \
+  VESPRY_HF_TOKEN="$YOUR_INTERNAL_TOKEN" \
+  pnpm tauri dev
+```
+
+The build captures the endpoint when it is set during `pnpm tauri build`. Tokens are read only at runtime and are never embedded in the application binary.
+
+The endpoint can also be set in Vespry under **Settings → Models → Model download endpoint**. For example:
+
+```
+https://huggingface-mirror.example.com
+```
+
 Tests (headless — synthesize speech with `say`, run it through both ASR engines and the cleanup LLM):
 
 ```

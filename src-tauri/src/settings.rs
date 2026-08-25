@@ -23,6 +23,8 @@ pub struct Settings {
     pub sounds_enabled: bool,
     /// Let cleanup format spoken enumerations as Markdown lists.
     pub smart_formatting: bool,
+    /// Optional Hugging Face-compatible endpoint for model downloads.
+    pub hf_endpoint: String,
 }
 
 impl Default for Settings {
@@ -36,6 +38,7 @@ impl Default for Settings {
             hotkey: "right-cmd".into(),
             sounds_enabled: true,
             smart_formatting: true,
+            hf_endpoint: String::new(),
         }
     }
 }

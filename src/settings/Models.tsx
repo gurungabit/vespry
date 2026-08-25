@@ -16,6 +16,7 @@ type Settings = {
   engine: string;
   whisperModel: string;
   language: string | null;
+  hfEndpoint: string;
 };
 
 type Download = {
@@ -92,8 +93,9 @@ export default function Models() {
       m.id === "parakeet"
         ? { ...settings, engine: "parakeet" }
         : { ...settings, engine: "whisper", whisperModel: m.id };
+    // Saving the engine choice preloads it, which downloads if needed —
+    // calling download() here too would fetch the same file twice.
     save(next);
-    if (!m.installed) download(m.id);
   };
 
   const isSelected = (m: ModelInfo) =>
@@ -161,6 +163,29 @@ export default function Models() {
         Parakeet is the fastest. Pick a Whisper model for languages Parakeet
         doesn't cover (it supports ~100).
       </p>
+      {settings && (
+        <label className="mb-2 flex flex-col gap-1.5 rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+          <span className="text-sm font-medium">Model download endpoint</span>
+          <input
+            type="url"
+            value={settings.hfEndpoint}
+            placeholder="https://huggingface-mirror.example.com"
+            spellCheck={false}
+            onChange={(e) =>
+              setSettings({ ...settings, hfEndpoint: e.target.value })
+            }
+            onBlur={() => save(settings)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            className="w-full rounded-md border border-black/10 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-neutral-800"
+          />
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">
+            Leave blank for https://huggingface.co. Authenticated endpoints use
+            VESPRY_HF_TOKEN or HF_TOKEN from the environment.
+          </span>
+        </label>
+      )}
       {models.filter((m) => m.kind === "asr").map(renderModel)}
 
       {settings?.engine === "whisper" && (

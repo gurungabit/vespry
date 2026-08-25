@@ -6,8 +6,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 
 pub const PARAKEET_DIR: &str = "parakeet-tdt-0.6b-v3-int8";
-const PARAKEET_BASE: &str =
-    "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main";
+const DEFAULT_HF_ENDPOINT: &str = "https://huggingface.co";
+const PARAKEET_REPO: &str = "istupakov/parakeet-tdt-0.6b-v3-onnx";
 const PARAKEET_FILES: &[&str] = &[
     "encoder-model.int8.onnx",
     "decoder_joint-model.int8.onnx",
@@ -20,8 +20,7 @@ const PARAKEET_FILES: &[&str] = &[
 // both rules and is still sub-second on Apple Silicon.
 pub const QWEN_NAME: &str = "qwen3-4b-instruct-q4km";
 const QWEN_FILE: &str = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
-const QWEN_URL: &str =
-    "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
+const QWEN_REPO: &str = "unsloth/Qwen3-4B-Instruct-2507-GGUF";
 
 /// Curated whisper.cpp models (multilingual, ggml format).
 pub struct WhisperModel {
@@ -52,7 +51,38 @@ pub const WHISPER_MODELS: &[WhisperModel] = &[
     },
 ];
 
-const WHISPER_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const WHISPER_REPO: &str = "ggerganov/whisper.cpp";
+
+/// Pick the download host: runtime environment first (so a launch-time
+/// override always wins), then the Settings field, then any endpoint baked in
+/// at build time, then Hugging Face itself. Blank or whitespace-only values
+/// are ignored so an empty setting or `VESPRY_HF_ENDPOINT=` can't produce a
+/// malformed URL.
+fn resolve_endpoint(configured: &str) -> String {
+    fn non_blank(value: String) -> Option<String> {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    }
+
+    std::env::var("VESPRY_HF_ENDPOINT")
+        .ok()
+        .and_then(non_blank)
+        .or_else(|| non_blank(configured.to_owned()))
+        .or_else(|| {
+            option_env!("VESPRY_HF_ENDPOINT")
+                .map(str::to_owned)
+                .and_then(non_blank)
+        })
+        .unwrap_or_else(|| DEFAULT_HF_ENDPOINT.to_owned())
+}
+
+fn model_url(app: &AppHandle, repository: &str, file: &str) -> String {
+    let configured = crate::settings::load(app).hf_endpoint;
+    format!(
+        "{}/{repository}/resolve/main/{file}",
+        resolve_endpoint(&configured).trim_end_matches('/')
+    )
+}
 
 pub fn whisper_model(id: &str) -> Option<&'static WhisperModel> {
     WHISPER_MODELS.iter().find(|m| m.id == id)
@@ -79,7 +109,7 @@ pub async fn ensure_whisper(app: &AppHandle, id: &str) -> Result<PathBuf> {
     let client = reqwest::Client::new();
     download(
         &client,
-        &format!("{WHISPER_BASE_URL}/{}", model.file),
+        &model_url(app, WHISPER_REPO, model.file),
         &path,
         app,
         id,
@@ -140,7 +170,7 @@ pub async fn ensure_parakeet(app: &AppHandle) -> Result<PathBuf> {
         log::info!("downloading {file}…");
         download(
             &client,
-            &format!("{PARAKEET_BASE}/{file}"),
+            &model_url(app, PARAKEET_REPO, file),
             &dest,
             app,
             PARAKEET_DIR,
@@ -161,10 +191,34 @@ pub async fn ensure_qwen(app: &AppHandle) -> Result<PathBuf> {
     tokio::fs::create_dir_all(models_root(app)?).await?;
     log::info!("downloading {QWEN_FILE}…");
     let client = reqwest::Client::new();
-    download(&client, QWEN_URL, &path, app, QWEN_NAME, QWEN_FILE)
-        .await
-        .with_context(|| format!("downloading {QWEN_FILE}"))?;
+    download(
+        &client,
+        &model_url(app, QWEN_REPO, QWEN_FILE),
+        &path,
+        app,
+        QWEN_NAME,
+        QWEN_FILE,
+    )
+    .await
+    .with_context(|| format!("downloading {QWEN_FILE}"))?;
     Ok(path)
+}
+
+/// One lock per destination file. Selecting an uninstalled model both saves
+/// the setting (which preloads, downloading) and calls download_model, so the
+/// same file could be fetched twice at once: whichever finished first renamed
+/// the shared .part file and the other failed with ENOENT.
+fn download_lock(dest: &PathBuf) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .entry(dest.clone())
+        .or_default()
+        .clone()
 }
 
 async fn download(
@@ -175,7 +229,30 @@ async fn download(
     model: &str,
     file: &str,
 ) -> Result<()> {
-    let resp = client.get(url).send().await?.error_for_status()?;
+    let lock = download_lock(dest);
+    let _guard = lock.lock().await;
+    if dest.exists() {
+        // A concurrent request finished this file while we waited.
+        return Ok(());
+    }
+
+    let mut request = client.get(url);
+    if let Ok(token) = std::env::var("VESPRY_HF_TOKEN").or_else(|_| std::env::var("HF_TOKEN")) {
+        request = request.bearer_auth(token);
+    }
+    let resp = request.send().await?.error_for_status()?;
+    // A captive portal or a mirror serving a login page answers 200 with HTML,
+    // which would otherwise be written out as a corrupt "model" file.
+    if resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/html"))
+    {
+        anyhow::bail!(
+            "model download returned HTML instead of model data; set VESPRY_HF_ENDPOINT to an accessible Hugging Face mirror"
+        );
+    }
     let total = resp.content_length();
     // Write to a .part file so an interrupted download never looks installed.
     let part = dest.with_extension("part");
@@ -216,4 +293,42 @@ async fn download(
     );
     log::info!("downloaded {file} ({downloaded} bytes)");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Endpoint resolution is env-sensitive, so these run in one test to keep
+    /// the var's effects ordered (cargo runs tests in parallel threads).
+    #[test]
+    fn endpoint_precedence_and_blank_handling() {
+        // SAFETY: single-threaded within this test; no other test reads this var.
+        unsafe { std::env::remove_var("VESPRY_HF_ENDPOINT") };
+        assert_eq!(resolve_endpoint(""), DEFAULT_HF_ENDPOINT);
+        assert_eq!(resolve_endpoint("   "), DEFAULT_HF_ENDPOINT);
+        assert_eq!(
+            resolve_endpoint("https://mirror.example.com"),
+            "https://mirror.example.com"
+        );
+        // Pasted values often carry whitespace.
+        assert_eq!(
+            resolve_endpoint("  https://mirror.example.com  "),
+            "https://mirror.example.com"
+        );
+
+        unsafe { std::env::set_var("VESPRY_HF_ENDPOINT", "https://env.example.com") };
+        assert_eq!(
+            resolve_endpoint("https://setting.example.com"),
+            "https://env.example.com"
+        );
+
+        // An explicitly empty env var must not win and produce a bare path.
+        unsafe { std::env::set_var("VESPRY_HF_ENDPOINT", "") };
+        assert_eq!(
+            resolve_endpoint("https://setting.example.com"),
+            "https://setting.example.com"
+        );
+        unsafe { std::env::remove_var("VESPRY_HF_ENDPOINT") };
+    }
 }

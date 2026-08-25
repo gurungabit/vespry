@@ -11,6 +11,9 @@ fn main() {
         .unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=VESPRY_GIT_SHA={sha}");
     println!("cargo:rerun-if-changed=../.git/HEAD");
+    // models.rs bakes this in via option_env!; without this line a changed
+    // endpoint wouldn't trigger a rebuild and the stale one would ship.
+    println!("cargo:rerun-if-env-changed=VESPRY_HF_ENDPOINT");
 
     tauri_build::build()
 }
