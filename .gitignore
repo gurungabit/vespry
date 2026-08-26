@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Transient Claude Code lock file
+.claude/scheduled_tasks.lock
