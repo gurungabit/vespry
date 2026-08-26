@@ -12,5 +12,7 @@ cd "$(dirname "$0")/.."
 
 pnpm tauri build
 APP=src-tauri/target/release/bundle/macos/Vespry.app
-codesign --force --deep -s "Vespry Dev Signing" "$APP"
+codesign --force --deep --options runtime \
+  --entitlements src-tauri/Entitlements.plist \
+  -s "Vespry Dev Signing" "$APP"
 echo "Built and signed: $APP"
