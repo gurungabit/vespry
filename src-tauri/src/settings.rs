@@ -17,8 +17,12 @@ pub struct Settings {
     pub whisper_model: String,
     /// Spoken-language hint for whisper (BCP-47, e.g. "ja"); None = auto-detect.
     pub language: Option<String>,
-    /// Push-to-talk key id: right-cmd, right-alt, fn, left-ctrl, f5.
+    /// Shortcut spec — see `shortcuts`: modifier tokens plus an optional
+    /// key, e.g. "right-cmd", "fn", "ctrl+shift+KeyD".
     pub hotkey: String,
+    /// "hold" = push-to-talk, dictate while the shortcut is held.
+    /// "toggle" = press once to start, again to stop.
+    pub hotkey_mode: String,
     /// Play start/stop chimes.
     pub sounds_enabled: bool,
     /// Let cleanup format spoken enumerations as Markdown lists.
@@ -35,7 +39,8 @@ impl Default for Settings {
             engine: "parakeet".into(),
             whisper_model: "small".into(),
             language: None,
-            hotkey: "right-cmd".into(),
+            hotkey: crate::shortcuts::DEFAULT.into(),
+            hotkey_mode: "hold".into(),
             sounds_enabled: true,
             smart_formatting: true,
             hf_endpoint: String::new(),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import ShortcutRecorder, { formatShortcut } from "./Shortcut";
 
 type Status = {
   microphone: boolean;
@@ -16,17 +17,10 @@ type Settings = {
   whisperModel: string;
   language: string | null;
   hotkey: string;
+  hotkeyMode: string;
   soundsEnabled: boolean;
   smartFormatting: boolean;
 };
-
-const HOTKEYS: [string, string][] = [
-  ["right-cmd", "Right ⌘"],
-  ["right-alt", "Right ⌥"],
-  ["fn", "Fn 🌐 (set 🌐 key to “Do Nothing” in System Settings)"],
-  ["left-ctrl", "Left ⌃"],
-  ["f5", "F5"],
-];
 
 function Toggle({
   on,
@@ -148,9 +142,8 @@ export default function General() {
     }
   };
 
-  const hotkeyLabel =
-    HOTKEYS.find(([id]) => id === settings?.hotkey)?.[1]?.split(" (")[0] ??
-    "Right ⌘";
+  const hotkeyLabel = formatShortcut(settings?.hotkey ?? "right-cmd");
+  const toggleMode = settings?.hotkeyMode === "toggle";
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-3">
@@ -239,20 +232,38 @@ export default function General() {
       )}
 
       <h2 className="mt-4 text-base font-semibold">Behavior</h2>
-      <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-        <p className="text-sm font-medium">Push-to-talk key</p>
-        <select
+      <div className="flex items-start justify-between gap-4 rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <div>
+          <p className="text-sm font-medium">Shortcut</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            Click, then hold the keys you want. A modifier on its own — ⌘, ⌥,
+            ⌃ — works best: Vespry watches keys rather than swallowing them, so
+            a shortcut with a letter still types that letter.
+          </p>
+        </div>
+        <ShortcutRecorder
           value={settings?.hotkey ?? "right-cmd"}
+          onChange={(hotkey) => settings && save({ ...settings, hotkey })}
+        />
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <div>
+          <p className="text-sm font-medium">Activation</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            {toggleMode
+              ? "Press once to start, again to stop"
+              : "Dictate for as long as you hold the shortcut"}
+          </p>
+        </div>
+        <select
+          value={settings?.hotkeyMode ?? "hold"}
           onChange={(e) =>
-            settings && save({ ...settings, hotkey: e.target.value })
+            settings && save({ ...settings, hotkeyMode: e.target.value })
           }
           className="max-w-56 rounded-md border border-black/10 bg-white px-2 py-1 text-sm dark:border-white/10 dark:bg-neutral-800"
         >
-          {HOTKEYS.map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
+          <option value="hold">Hold to talk</option>
+          <option value="toggle">Press to start and stop</option>
         </select>
       </div>
       <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
@@ -279,19 +290,28 @@ export default function General() {
 
       <h2 className="mt-4 text-base font-semibold">How to dictate</h2>
       <div className="rounded-lg border border-black/10 bg-white/60 px-4 py-3 text-sm leading-6 dark:border-white/10 dark:bg-white/5">
-        <p>
-          <b>Hold {hotkeyLabel}</b> and speak, release to insert the text
-          wherever your cursor is.
-        </p>
+        {toggleMode ? (
+          <p>
+            <b>Press {hotkeyLabel}</b> and speak, press it again to insert the
+            text wherever your cursor is.
+          </p>
+        ) : (
+          <p>
+            <b>Hold {hotkeyLabel}</b> and speak, release to insert the text
+            wherever your cursor is.
+          </p>
+        )}
         <p className="text-neutral-500 dark:text-neutral-400">
-          Quick-tap instead to dictate hands-free — tap again to finish.
+          Start / Stop Dictation in the menu bar always runs hands-free.
         </p>
       </div>
 
       <h2 className="mt-4 text-base font-semibold">Try it</h2>
       <textarea
         className="min-h-24 w-full resize-none rounded-lg border border-black/10 bg-white p-3 text-sm outline-none focus:border-blue-400 dark:border-white/10 dark:bg-white/10"
-        placeholder="Click here, then hold right ⌘ and speak…"
+        placeholder={`Click here, then ${
+          toggleMode ? "press" : "hold"
+        } ${hotkeyLabel} and speak…`}
       />
     </div>
   );

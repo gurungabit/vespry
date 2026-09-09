@@ -11,6 +11,8 @@ mod shortcuts;
 mod sounds;
 
 use settings::{Settings, SharedSettings};
+use shortcuts::CaptureFlag;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use serde::Serialize;
@@ -53,6 +55,13 @@ fn set_settings(
     app.state::<PipelineHandle>()
         .send(controller::PipelineEvent::PreloadModel);
     Ok(())
+}
+
+/// Silence the global shortcut while the settings window records a new one,
+/// so the keys being pressed there don't start a dictation too.
+#[tauri::command]
+fn set_shortcut_capture(capturing: tauri::State<CaptureFlag>, active: bool) {
+    capturing.store(active, Ordering::Relaxed);
 }
 
 #[derive(Serialize)]
@@ -300,7 +309,8 @@ pub fn run() {
             delete_history_entry,
             clear_history,
             get_autostart,
-            set_autostart
+            set_autostart,
+            set_shortcut_capture
         ])
         .setup(|app| {
             // Menu-bar app: no Dock icon, lives in the tray.
@@ -312,8 +322,10 @@ pub fn run() {
             app.manage(shared_settings.clone());
 
             // The dictation pipeline thread + the global hotkey listener.
+            let capturing: CaptureFlag = Arc::new(AtomicBool::new(false));
+            app.manage(capturing.clone());
             let pipeline = controller::spawn(app.handle().clone(), shared_settings.clone());
-            shortcuts::spawn_listener(pipeline.clone(), shared_settings.clone());
+            shortcuts::spawn_listener(pipeline.clone(), shared_settings.clone(), capturing);
             app.manage(PipelineHandle(std::sync::Mutex::new(pipeline.clone())));
 
             let toggle =

@@ -39,10 +39,6 @@ fn set_state(app: &AppHandle, state: DictationState) {
     let _ = app.emit("dictation-state", state);
 }
 
-/// A press-to-release shorter than this is a tap: it arms hands-free mode
-/// (keep listening until the key is tapped again) instead of stopping.
-const TAP_MS: u128 = 300;
-
 /// Ignore blips shorter than this — almost certainly an accidental tap.
 const MIN_SAMPLES: usize = (crate::audio::TARGET_RATE as usize) / 4;
 
@@ -63,8 +59,9 @@ struct Pipeline {
     loaded_key: String,
     cleanup: Option<LlamaCleanup>,
     listening: bool,
+    /// Keep listening after the shortcut is released — set by toggle mode
+    /// and by the tray's Start/Stop item.
     hands_free: bool,
-    pressed_at: Instant,
 }
 
 fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
@@ -77,7 +74,6 @@ fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
         cleanup: None,
         listening: false,
         hands_free: false,
-        pressed_at: Instant::now(),
     };
 
     for event in rx {
@@ -97,8 +93,13 @@ fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
                         p.finish();
                     }
                 } else {
-                    p.pressed_at = Instant::now();
                     p.start();
+                    // In toggle mode the release means nothing: this session
+                    // runs until the shortcut is pressed again.
+                    if p.listening && p.toggle_mode() {
+                        p.hands_free = true;
+                        set_state(&p.app, DictationState::Listening { hands_free: true });
+                    }
                 }
             }
             PipelineEvent::Toggle => {
@@ -113,14 +114,7 @@ fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
                 }
             }
             PipelineEvent::HotkeyReleased => {
-                if !p.listening || p.hands_free {
-                    continue;
-                }
-                if p.pressed_at.elapsed().as_millis() < TAP_MS {
-                    // Quick tap → stay listening hands-free.
-                    p.hands_free = true;
-                    set_state(&p.app, DictationState::Listening { hands_free: true });
-                } else {
+                if p.listening && !p.hands_free {
                     p.finish();
                 }
             }
@@ -129,6 +123,11 @@ fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
 }
 
 impl Pipeline {
+    /// Press to start, press again to stop — as opposed to hold-to-talk.
+    fn toggle_mode(&self) -> bool {
+        self.settings.read().unwrap().hotkey_mode == "toggle"
+    }
+
     fn start(&mut self) {
         match self.recorder.start(self.app.clone()) {
             Ok(()) => {
