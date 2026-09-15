@@ -5,8 +5,9 @@ use anyhow::Result;
 use std::time::Instant;
 
 /// Turns a raw transcript into clean written text. Implementations must
-/// respect `deadline` — past it, stop generating and return what they have
-/// (the caller falls back to the raw transcript if the result is unusable).
+/// respect `deadline` — past it, stop generating and return an error.
+/// Only completed output is usable; the caller falls back to the raw transcript
+/// on failure rather than risking a truncated dictation.
 pub trait CleanupEngine: Send {
     fn cleanup(
         &mut self,

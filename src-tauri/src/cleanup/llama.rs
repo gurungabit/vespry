@@ -47,6 +47,9 @@ impl LlamaCleanup {
     }
 
     fn generate(&mut self, full_prompt: &str, deadline: Instant) -> Result<String> {
+        if Instant::now() >= deadline {
+            return Err(anyhow!("cleanup deadline exceeded"));
+        }
         // Fresh context per request: cheap, and no KV-cache state to manage.
         let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(N_CTX));
         let mut ctx = self
@@ -75,15 +78,16 @@ impl LlamaCleanup {
 
         let mut out = String::new();
         let mut n_cur = batch.n_tokens();
-        let max_tokens = (tokens.len() * 2).clamp(64, MAX_NEW_TOKENS);
+        let max_tokens = (tokens.len() * 2)
+            .clamp(64, MAX_NEW_TOKENS)
+            .min(N_CTX as usize - tokens.len());
         for _ in 0..max_tokens {
-            if Instant::now() > deadline {
-                log::warn!("cleanup hit its deadline; returning partial output");
-                break;
+            if Instant::now() >= deadline {
+                return Err(anyhow!("cleanup deadline exceeded"));
             }
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             if self.model.is_eog_token(token) {
-                break;
+                return Ok(out);
             }
             let piece = self
                 .model
@@ -95,7 +99,9 @@ impl LlamaCleanup {
             n_cur += 1;
             ctx.decode(&mut batch).map_err(|e| anyhow!("decode: {e}"))?;
         }
-        Ok(out)
+        // A partial answer can pass the word-overlap guardrail while losing
+        // the final constraint. Let the caller fall back to the full transcript.
+        Err(anyhow!("cleanup reached its token limit before completing"))
     }
 }
 
@@ -129,6 +135,69 @@ impl CleanupEngine for LlamaCleanup {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn cleans_rambling_request_preserving_names_and_constraints() {
+        let gguf = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(
+            "Library/Application Support/com.vespry.app/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        );
+        if !gguf.exists() {
+            eprintln!("skipping: cleanup model not downloaded");
+            return;
+        }
+        let mut engine = LlamaCleanup::load(&gguf).expect("loading model");
+        let transcript =
+            "Looking at the current state of farm code, we have a lot of things going on. \
+            I would like for you to go back and do a deeper dive into the project, analyze it, \
+            you can use sub threads and I need you to do a cleanup like a code cleanup where \
+            if there are any junk, unreachable code, remove it, look for any securities, \
+            vulnerabilities, any dead code. I just need some code cleanup, but we need to \
+            make sure that we're not breaking any functionalities.";
+        let started = Instant::now();
+        let cleaned = engine
+            .cleanup(
+                transcript,
+                &["FarmCode".into()],
+                false,
+                started + Duration::from_secs(30),
+            )
+            .expect("cleanup");
+        println!(
+            "FarmCode cleanup ({:.2}s): {cleaned}",
+            started.elapsed().as_secs_f32()
+        );
+        let lower = cleaned.to_lowercase();
+        assert!(cleaned.contains("FarmCode"), "name lost: {cleaned}");
+        for concept in ["project", "unreachable", "vulnerabilities", "dead code"] {
+            assert!(lower.contains(concept), "lost {concept}: {cleaned}");
+        }
+        assert!(
+            lower.contains("subthread") || lower.contains("sub thread"),
+            "lost delegation: {cleaned}"
+        );
+        assert!(
+            lower.contains("not breaking")
+                || lower.contains("without breaking")
+                || lower.contains("don't break")
+                || lower.contains("preserv"),
+            "lost constraint: {cleaned}"
+        );
+        assert!(
+            cleaned.len() * 10 < transcript.len() * 9,
+            "rambling wasn't reduced: {cleaned}"
+        );
+        assert!(
+            prompt::acceptable(transcript, &cleaned),
+            "guardrail rejected: {cleaned}"
+        );
+
+        assert!(
+            engine
+                .cleanup(transcript, &[], false, Instant::now())
+                .is_err(),
+            "an expired request must fall back, not return partial text"
+        );
+    }
 
     /// End-to-end cleanup check. Skips (passes) if the GGUF isn't downloaded
     /// yet — run the app once with cleanup enabled first.
@@ -188,6 +257,20 @@ mod tests {
             cleaned.to_lowercase().contains("without the comments"),
             "content dropped: {cleaned:?}"
         );
+
+        let meaningful = "I like FarmCode, so don't rename it. I think it might need a review.";
+        let cleaned = engine
+            .cleanup(
+                meaningful,
+                &[],
+                false,
+                Instant::now() + Duration::from_secs(30),
+            )
+            .expect("cleanup");
+        println!("meaningful words: {cleaned}");
+        for phrase in ["like FarmCode", "don't rename", "I think", "might"] {
+            assert!(cleaned.contains(phrase), "lost {phrase}: {cleaned}");
+        }
     }
 
     /// Smart formatting turns a spoken enumeration into a list, and leaves
@@ -223,6 +306,18 @@ mod tests {
         assert!(
             prompt::acceptable(spoken, &listed),
             "guardrail rejected the list"
+        );
+
+        let unlisted = engine
+            .cleanup(spoken, &[], false, deadline())
+            .expect("cleanup");
+        println!("formatting disabled: {unlisted}");
+        assert!(
+            !unlisted.lines().any(|line| {
+                let line = line.trim_start();
+                line.starts_with("- ") || line.starts_with("* ") || line.starts_with("1. ")
+            }),
+            "formatting disabled but got a list: {unlisted}"
         );
 
         // Prose that merely mentions several things must not become a list.
