@@ -8,7 +8,7 @@ use crate::settings::SharedSettings;
 use crate::sounds::{self, Chime};
 use crate::{history, hud, inject, models};
 use serde::Serialize;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
@@ -39,6 +39,10 @@ fn set_state(app: &AppHandle, state: DictationState) {
     let _ = app.emit("dictation-state", state);
 }
 
+/// How often the pipeline thread checks whether its models have sat idle
+/// long enough to free.
+const IDLE_CHECK: Duration = Duration::from_secs(30);
+
 /// Ignore blips shorter than this — almost certainly an accidental tap.
 const MIN_SAMPLES: usize = (crate::audio::TARGET_RATE as usize) / 4;
 
@@ -58,6 +62,8 @@ struct Pipeline {
     /// Which engine/model/language combination `transcriber` was loaded for.
     loaded_key: String,
     cleanup: Option<LlamaCleanup>,
+    /// When a model was last loaded or used — the idle-unload clock.
+    last_active: Instant,
     listening: bool,
     /// Keep listening after the shortcut is released — set by toggle mode
     /// and by the tray's Start/Stop item.
@@ -72,11 +78,22 @@ fn run(app: AppHandle, settings: SharedSettings, rx: Receiver<PipelineEvent>) {
         transcriber: None,
         loaded_key: String::new(),
         cleanup: None,
+        last_active: Instant::now(),
         listening: false,
         hands_free: false,
     };
 
-    for event in rx {
+    loop {
+        // Wake up periodically so idle models can be freed even when no
+        // events arrive.
+        let event = match rx.recv_timeout(IDLE_CHECK) {
+            Ok(event) => event,
+            Err(RecvTimeoutError::Timeout) => {
+                p.unload_if_idle();
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
         match event {
             PipelineEvent::PreloadModel => {
                 p.ensure_transcriber();
@@ -136,6 +153,13 @@ impl Pipeline {
                 set_state(&self.app, DictationState::Listening { hands_free: false });
                 hud::show(&self.app);
                 self.chime(Chime::Start);
+                // If the models were freed while idle, reload them now: the
+                // mic keeps recording on its own thread, and the release
+                // event simply waits in the queue until loading is done.
+                self.ensure_transcriber();
+                if self.settings.read().unwrap().cleanup_enabled {
+                    self.ensure_cleanup_loaded();
+                }
             }
             Err(e) => self.fail(format!("couldn't start recording: {e:#}")),
         }
@@ -235,17 +259,41 @@ impl Pipeline {
             return;
         }
         match LlamaCleanup::load(&path) {
-            Ok(engine) => self.cleanup = Some(engine),
+            Ok(engine) => {
+                self.cleanup = Some(engine);
+                self.last_active = Instant::now();
+            }
             Err(e) => log::error!("cleanup model load failed: {e:#}"),
         }
     }
 
-    fn idle(&self) {
+    /// Drop the models once they've gone unused for the configured time, so
+    /// an idle app in the menu bar doesn't hold gigabytes of weights.
+    fn unload_if_idle(&mut self) {
+        let minutes = self.settings.read().unwrap().unload_after_minutes;
+        if minutes == 0 || self.listening {
+            return;
+        }
+        if self.transcriber.is_none() && self.cleanup.is_none() {
+            return;
+        }
+        if self.last_active.elapsed() < Duration::from_secs(u64::from(minutes) * 60) {
+            return;
+        }
+        log::info!("models idle for {minutes} min; unloading to free memory");
+        self.transcriber = None;
+        self.loaded_key.clear();
+        self.cleanup = None;
+    }
+
+    fn idle(&mut self) {
+        self.last_active = Instant::now();
         set_state(&self.app, DictationState::Idle);
         hud::hide_later(&self.app, Duration::from_millis(600));
     }
 
-    fn fail(&self, message: String) {
+    fn fail(&mut self, message: String) {
+        self.last_active = Instant::now();
         log::error!("{message}");
         set_state(
             &self.app,
@@ -313,6 +361,7 @@ impl Pipeline {
         };
         if loaded.is_some() {
             self.loaded_key = desired_key;
+            self.last_active = Instant::now();
         }
         self.transcriber = loaded;
     }

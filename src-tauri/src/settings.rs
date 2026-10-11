@@ -29,6 +29,9 @@ pub struct Settings {
     pub smart_formatting: bool,
     /// Optional Hugging Face-compatible endpoint for model downloads.
     pub hf_endpoint: String,
+    /// Free the speech and cleanup models after this many idle minutes;
+    /// 0 keeps them loaded for as long as the app runs.
+    pub unload_after_minutes: u32,
 }
 
 impl Default for Settings {
@@ -44,6 +47,7 @@ impl Default for Settings {
             sounds_enabled: true,
             smart_formatting: true,
             hf_endpoint: String::new(),
+            unload_after_minutes: 5,
         }
     }
 }
