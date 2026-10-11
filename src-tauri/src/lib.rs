@@ -50,10 +50,20 @@ fn set_settings(
     new_settings: Settings,
 ) -> Result<(), String> {
     settings::save(&app, &new_settings).map_err(|e| e.to_string())?;
+    let speech_changed = {
+        let old = state.read().unwrap();
+        old.engine != new_settings.engine
+            || old.whisper_model != new_settings.whisper_model
+            || old.language != new_settings.language
+    };
     *state.write().unwrap() = new_settings;
-    // Reload models eagerly so an engine switch doesn't stall the next dictation.
-    app.state::<PipelineHandle>()
-        .send(controller::PipelineEvent::PreloadModel);
+    // Reload models eagerly so an engine switch doesn't stall the next
+    // dictation. Other changes leave them alone, so toggling an unrelated
+    // setting doesn't pull models freed while idle back into memory.
+    if speech_changed {
+        app.state::<PipelineHandle>()
+            .send(controller::PipelineEvent::PreloadModel);
+    }
     Ok(())
 }
 

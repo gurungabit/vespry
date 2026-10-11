@@ -20,6 +20,7 @@ type Settings = {
   hotkeyMode: string;
   soundsEnabled: boolean;
   smartFormatting: boolean;
+  unloadAfterMinutes: number;
 };
 
 function Toggle({
@@ -275,6 +276,30 @@ export default function General() {
             save({ ...settings, soundsEnabled: !settings.soundsEnabled })
           }
         />
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <div>
+          <p className="text-sm font-medium">Free memory when idle</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            Unloads the speech and cleanup models when you're not dictating.
+            They reload while you speak, so the next dictation may take a
+            moment longer.
+          </p>
+        </div>
+        <select
+          value={settings?.unloadAfterMinutes ?? 5}
+          onChange={(e) =>
+            settings &&
+            save({ ...settings, unloadAfterMinutes: Number(e.target.value) })
+          }
+          className="max-w-56 shrink-0 rounded-md border border-black/10 bg-white px-2 py-1 text-sm dark:border-white/10 dark:bg-neutral-800"
+        >
+          <option value={1}>After 1 minute</option>
+          <option value={5}>After 5 minutes</option>
+          <option value={15}>After 15 minutes</option>
+          <option value={60}>After 1 hour</option>
+          <option value={0}>Never</option>
+        </select>
       </div>
       <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white/60 px-4 py-3 dark:border-white/10 dark:bg-white/5">
         <p className="text-sm font-medium">Launch at login</p>

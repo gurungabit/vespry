@@ -4,7 +4,7 @@ Wispr Flow-style local dictation app. Tauri v2 + React/TS/Tailwind front, Rust c
 
 ## Architecture (src-tauri/src)
 
-- `controller.rs` — the pipeline state machine on its own thread (owns the !Send cpal stream and the loaded models). Events in via mpsc: HotkeyPressed/Released, Toggle (tray), PreloadModel, PreloadCleanup. States out via `dictation-state` Tauri events: idle → listening → transcribing → cleaning → injecting.
+- `controller.rs` — the pipeline state machine on its own thread (owns the !Send cpal stream and the loaded models). Events in via mpsc: HotkeyPressed/Released, Toggle (tray), PreloadModel, PreloadCleanup. States out via `dictation-state` Tauri events: idle → listening → transcribing → cleaning → injecting. Models are dropped after `unload_after_minutes` idle (default 5, 0 = never; checked via `recv_timeout`) and reloaded in `start()` while the mic records — the release event just queues behind the load.
 - `shortcuts.rs` — macOS polls CGEventSourceFlagsState/KeyState (~33 ms, no permissions); rdev (rustdesk fork) is the listener for the other ports. Shortcuts are `+`-joined specs parsed per-poll from settings: modifier tokens (`right-cmd`, `ctrl`, `fn`, side-specific via NX_DEVICE* bits) plus an optional key named by its DOM `code` (`KeyD`, `F5`). Settings' recorder mutes the listener via `set_shortcut_capture` while recording. `hotkey_mode` picks hold-to-talk (default) or press/press-again.
 - `audio.rs` — cpal capture at device rate → rubato resample to 16 kHz mono on stop; emits `audio-level` RMS events ~20 Hz for the HUD.
 - `asr/` — `Transcriber` trait; `parakeet.rs` (transcribe-rs ONNX int8, default), `whisper.rs` (transcribe-rs whisper-metal). Controller reloads when settings' engine/model/language key changes.
